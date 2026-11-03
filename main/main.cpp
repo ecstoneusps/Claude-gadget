@@ -1,0 +1,189 @@
+// Desk companion for the M5Stack CoreS3 (ESP-IDF).
+//
+// Pieces:
+//   components/face       draws and animates the face (portable)
+//   components/companion  decides how to react to events (portable, unit-tested)
+//   main/voice.cpp        offline speech: "Hey Buddy" wake word + commands
+//   this file             hardware glue: display, touch, IMU, battery, main loop
+
+#include <math.h>
+#include <atomic>
+
+#include <M5Unified.h>
+#include "esp_log.h"
+#include "esp_random.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
+
+#include "Companion.h"
+#include "Face.h"
+#include "voice.h"
+
+static const char* TAG = "main";
+
+constexpr uint32_t kFrameMs = 33;   // ~30 fps
+constexpr uint8_t kBrightness = 160;
+constexpr uint8_t kDimBrightness = 20;
+constexpr float kShakeG = 1.0f;     // deviation from 1 g that counts as a shake
+constexpr float kTiltG = 0.25f;     // tilt (vs. resting pose) before the eyes follow
+constexpr float kMinCommandProb = 0.0f;  // raise to reject low-confidence commands
+
+static uint32_t nowMs() { return (uint32_t)(esp_timer_get_time() / 1000); }
+
+// Lets the portable face engine draw into an M5Canvas sprite.
+class M5CanvasAdapter : public Canvas {
+public:
+    explicit M5CanvasAdapter(M5Canvas& c) : c_(c) {}
+    int width() const override { return c_.width(); }
+    int height() const override { return c_.height(); }
+    void fillScreen(uint16_t col) override { c_.fillScreen(col); }
+    void fillRect(int x, int y, int w, int h, uint16_t col) override { c_.fillRect(x, y, w, h, col); }
+    void fillRoundRect(int x, int y, int w, int h, int r, uint16_t col) override {
+        c_.fillRoundRect(x, y, w, h, r, col);
+    }
+    void fillCircle(int x, int y, int r, uint16_t col) override { c_.fillCircle(x, y, r, col); }
+    void fillEllipse(int x, int y, int rx, int ry, uint16_t col) override { c_.fillEllipse(x, y, rx, ry, col); }
+    void fillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, uint16_t col) override {
+        c_.fillTriangle(x0, y0, x1, y1, x2, y2, col);
+    }
+
+private:
+    M5Canvas& c_;
+};
+
+static M5Canvas canvas(&M5.Display);
+static M5CanvasAdapter canvasAdapter(canvas);
+static Face face;
+static Companion buddy(face);
+static QueueHandle_t voiceEvents;
+static std::atomic<bool> voiceOk{false};
+
+static void handleTouch(uint32_t now) {
+    if (M5.Touch.getCount() == 0) return;
+    const auto t = M5.Touch.getDetail();
+    if (t.isHolding()) buddy.onHold(now);
+    else if (t.wasClicked()) buddy.onTap(now);
+}
+
+static void handleImu(uint32_t now) {
+    static bool haveRest = false, tilted = false;
+    static float restX = 0, restY = 0;
+
+    float ax, ay, az;
+    M5.Imu.update();
+    if (!M5.Imu.getAccel(&ax, &ay, &az)) return;
+
+    // Learn the resting pose and slowly re-learn it (~10 s) after it's moved.
+    if (!haveRest) {
+        restX = ax; restY = ay; haveRest = true;
+    } else {
+        restX += (ax - restX) * 0.003f;
+        restY += (ay - restY) * 0.003f;
+    }
+
+    const float mag = sqrtf(ax * ax + ay * ay + az * az);
+    if (fabsf(mag - 1.0f) > kShakeG) buddy.onShake(now);
+
+    // If the eyes look the wrong way on your unit, flip these signs.
+    const float tx = -(ax - restX), ty = (ay - restY);
+    if (fabsf(tx) > kTiltG || fabsf(ty) > kTiltG) {
+        buddy.onTilt(fminf(fmaxf(tx * 1.5f, -1), 1), fminf(fmaxf(ty * 1.5f, -1), 1), now);
+        tilted = true;
+    } else if (tilted) {
+        buddy.onTiltEnd();
+        tilted = false;
+    }
+}
+
+static void handleVoice(uint32_t now) {
+    if (!voiceOk.load()) return;
+    buddy.onAudio(voiceLevelDb(), voiceSpeech(), now);
+
+    VoiceEvent ev;
+    while (xQueueReceive(voiceEvents, &ev, 0) == pdTRUE) {
+        switch (ev.type) {
+            case VoiceEvent::WakeWord:
+                buddy.onWakeWord(now);
+                break;
+            case VoiceEvent::Command:
+                if (ev.prob >= kMinCommandProb) {
+                    ESP_LOGI(TAG, "-> %s", commandName((VoiceCommand)ev.commandId));
+                    buddy.onCommand((VoiceCommand)ev.commandId, now);
+                } else {
+                    buddy.onCommandTimeout(now);
+                }
+                break;
+            case VoiceEvent::Timeout:
+                buddy.onCommandTimeout(now);
+                break;
+        }
+    }
+}
+
+// Loading the speech models takes a few seconds, so do it off the UI task
+// and let the face animate meanwhile.
+static void voiceInitTask(void*) {
+    if (voiceStart(voiceEvents)) voiceOk.store(true);
+    else ESP_LOGW(TAG, "voice disabled; touch and motion still work");
+    vTaskDelete(nullptr);
+}
+
+static void uiTask(void*) {
+    uint32_t lastFrame = nowMs(), lastBattery = 0, lastImu = 0;
+    bool dimmed = false;
+    while (true) {
+        const uint32_t now = nowMs();
+        M5.update();
+        handleTouch(now);
+        if (now - lastImu >= 20) {  // 50 Hz
+            lastImu = now;
+            handleImu(now);
+        }
+        handleVoice(now);
+
+        if (lastBattery == 0 || now - lastBattery > 10000) {
+            lastBattery = now;
+            buddy.setLowBattery(!M5.Power.isCharging() && M5.Power.getBatteryLevel() < 10);
+        }
+
+        buddy.update(now);
+        if (buddy.wantsDim() != dimmed) {
+            dimmed = buddy.wantsDim();
+            M5.Display.setBrightness(dimmed ? kDimBrightness : kBrightness);
+        }
+
+        if (now - lastFrame >= kFrameMs) {
+            face.update(now - lastFrame);
+            lastFrame = now;
+            face.draw(canvasAdapter);
+            canvas.pushSprite(0, 0);
+        }
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+}
+
+extern "C" void app_main(void) {
+    auto cfg = M5.config();
+    M5.begin(cfg);
+    M5.Display.setRotation(1);  // landscape, 320x240
+    M5.Display.setBrightness(kBrightness);
+
+    canvas.setColorDepth(16);
+    canvas.setPsram(true);
+    if (!canvas.createSprite(M5.Display.width(), M5.Display.height())) {
+        M5.Display.println("Sprite alloc failed");
+        ESP_LOGE(TAG, "sprite alloc failed");
+        return;
+    }
+
+    face.setSeed(esp_random());
+    voiceEvents = xQueueCreate(8, sizeof(VoiceEvent));
+    const bool micOk = voiceMicBegin();
+
+    // Speech runs on core 0; drawing and input get core 1.
+    xTaskCreatePinnedToCore(uiTask, "ui", 8192, nullptr, 4, nullptr, 1);
+    if (micOk) xTaskCreatePinnedToCore(voiceInitTask, "sr_init", 8192, nullptr, 3, nullptr, 0);
+    ESP_LOGI(TAG, "desk companion started");
+}

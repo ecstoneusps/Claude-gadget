@@ -24,8 +24,8 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)
         exe = tmp / "preview"
-        subprocess.run(["g++", "-std=c++17", "-O2", "-Wall", "-Wextra", "-I", str(ROOT / "lib/Face"),
-                        str(ROOT / "tools/preview/preview.cpp"), str(ROOT / "lib/Face/Face.cpp"),
+        subprocess.run(["g++", "-std=c++17", "-O2", "-Wall", "-Wextra", "-I", str(ROOT / "components/face"),
+                        str(ROOT / "tools/preview/preview.cpp"), str(ROOT / "components/face/Face.cpp"),
                         "-o", str(exe)], check=True)
 
         names = subprocess.run([str(exe), "sheet", str(tmp / "sheet.rgb")], check=True,
