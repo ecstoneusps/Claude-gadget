@@ -7,6 +7,7 @@
 //   main/sound.cpp        sound effects through the speaker
 //   main/proximity.cpp    proximity sensor: notices you sitting down
 //   main/camera.cpp       camera + face detection: looks at you
+//   main/settings.cpp     settings kept across restarts (mute)
 //   this file             hardware glue: display, touch, IMU, battery, main loop
 
 #include <math.h>
@@ -25,6 +26,7 @@
 #include "Presence.h"
 #include "camera.h"
 #include "proximity.h"
+#include "settings.h"
 #include "sound.h"
 #include "voice.h"
 
@@ -209,6 +211,11 @@ static void uiTask(void*) {
         }
 
         buddy.update(now);
+        static bool savedMuted = buddy.isMuted();
+        if (buddy.isMuted() != savedMuted) {  // "be quiet" / "sound on" was said
+            savedMuted = buddy.isMuted();
+            settingsSetBool("muted", savedMuted);
+        }
         soundPlay(buddy.takeSound());
         soundUpdate(now);
         if (buddy.wantsDim() != dimmed) {
@@ -241,6 +248,8 @@ extern "C" void app_main(void) {
     }
 
     face.setSeed(esp_random());
+    settingsBegin();
+    buddy.setMuted(settingsGetBool("muted", false));
     voiceEvents = xQueueCreate(8, sizeof(VoiceEvent));
     const bool cameraOk = cameraBegin();  // before other tasks touch the I2C bus
     const bool micOk = voiceMicBegin();

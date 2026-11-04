@@ -27,7 +27,7 @@ about 6 seconds to say one of these:
 | be happy / be sad / be angry / be surprised | Shows that expression |
 | good night / go to sleep | Yawns, then sleeps and dims until "Hey Buddy", a tap, or a shake |
 | wake up | Startled awake |
-| be quiet / quiet please | Turns its sounds off |
+| be quiet / quiet please | Turns its sounds off (remembered after a restart) |
 | sound on / you can talk | Turns its sounds back on |
 
 If it doesn't catch a command, it looks confused for a moment.
@@ -105,6 +105,7 @@ main/voice.cpp         ESP-SR pipeline: mic -> audio front-end -> wake word -> c
 main/sound.cpp         Plays sound effects, switching the audio hardware mic <-> speaker
 main/proximity.cpp     LTR-553 proximity sensor driver (presence logic is in components/companion/Presence.*)
 main/camera.cpp        Camera setup and face detection task
+main/settings.cpp      Settings kept across restarts in flash (NVS): currently mute
 components/espdl_all_ops/  Build helper: makes esp-dl compile every neural-network op the face model may need
 tests/                 Native unit tests for the brain (run on a PC)
 tools/preview/         Renders the face to PNG/GIF on a PC
@@ -192,5 +193,5 @@ python3 tools/preview/make_preview.py   # face images + sound WAVs (needs g++ an
 6. ~~Sound effects through the speaker (chirps, giggles, yawns)~~
 7. ~~Proximity sensor: wake up when someone sits down~~
 8. ~~Camera: look toward your face~~
-9. Remember the mute setting across restarts
+9. ~~Remember the mute setting across restarts~~
 10. Cloud conversation: speech-to-text → LLM → emotion tag drives the face, with spoken replies
