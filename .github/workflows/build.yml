@@ -1,0 +1,53 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    name: Unit tests (PC)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Run companion / face / sound tests
+        run: tests/run_tests.sh
+
+  firmware:
+    name: Firmware (ESP-IDF, CoreS3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Build with ESP-IDF v5.4.1
+        uses: espressif/esp-idf-ci-action@v1.2.0
+        with:
+          esp_idf_version: v5.4.1
+          target: esp32s3
+          command: idf.py build
+
+      - name: Report sizes
+        run: |
+          ls -l build/desk_companion.bin build/srmodels/srmodels.bin
+          echo "### Firmware sizes" >> "$GITHUB_STEP_SUMMARY"
+          echo "- App: $(stat -c %s build/desk_companion.bin) bytes (partition: 4 MB)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Speech models: $(stat -c %s build/srmodels/srmodels.bin) bytes (partition: 8 MB)" >> "$GITHUB_STEP_SUMMARY"
+
+      # Everything needed to flash without building:
+      #   cd <unzipped folder>/build && python -m esptool --chip esp32s3 write_flash @flash_args
+      - name: Upload firmware
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: desk-companion-firmware
+          path: |
+            build/flash_args
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/desk_companion.bin
+            build/srmodels/srmodels.bin
+            dependencies.lock
+          if-no-files-found: error

@@ -1,5 +1,7 @@
 # Claude Gadget: desk companion
 
+[![Build](https://github.com/ecstoneusps/Claude-gadget/actions/workflows/build.yml/badge.svg)](https://github.com/ecstoneusps/Claude-gadget/actions/workflows/build.yml)
+
 A small desk buddy built on the **M5Stack CoreS3** (ESP32-S3). It shows an
 animated face that blinks, glances around, and changes expression. It chirps,
 giggles, purrs and yawns through its speaker, reacts to touch, motion and sound,
@@ -115,6 +117,23 @@ If flashing can't find the board, hold the reset button on the side for about
 
 The serial monitor logs every wake word and command, with a confidence value,
 which helps with tuning.
+
+### Flash a ready-made build (no ESP-IDF needed)
+
+GitHub Actions builds the firmware on every push (`.github/workflows/build.yml`).
+To flash it without installing ESP-IDF:
+
+1. Open the repository's **Actions** tab, pick the latest green **Build** run, and
+   download the **desk-companion-firmware** artifact. Unzip it.
+2. Install esptool with `pip install esptool`.
+3. With the CoreS3 plugged in:
+   ```
+   cd desk-companion-firmware/build
+   python -m esptool --chip esp32s3 write_flash @flash_args
+   ```
+
+The artifact also contains `dependencies.lock`, the exact library versions that
+build used. Commit it to the repo root to pin those versions for future builds.
 
 ## Tests and preview (on a PC)
 
