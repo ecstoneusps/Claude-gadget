@@ -7,3 +7,8 @@ g++ -std=c++17 -Wall -Wextra -Werror -Icomponents/face -Icomponents/companion -I
     tests/companion_test.cpp components/companion/Companion.cpp components/companion/Presence.cpp components/face/Face.cpp \
     components/sfx/Sfx.cpp -o "$OUT"
 "$OUT"
+
+g++ -std=c++17 -Wall -Wextra -Werror -Icomponents/face -Icomponents/companion -Icomponents/sfx -Icomponents/config \
+    tests/config_test.cpp components/config/BuddyConfig.cpp components/companion/Companion.cpp \
+    components/companion/Presence.cpp components/face/Face.cpp components/sfx/Sfx.cpp -o "$OUT.config"
+"$OUT.config" "$@"

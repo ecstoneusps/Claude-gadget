@@ -1,0 +1,41 @@
+# Desk Buddy settings
+#
+# Edit this file on your computer, put the card back in, and restart the
+# buddy (or unplug it and plug it back in). Anything after # is a comment.
+# Delete a line, or the whole file, to go back to the built-in default.
+# Mistakes are shown in the serial log and that line is ignored.
+
+# --- Sound and screen ---
+volume                       = 63     # speaker volume, 0-100 ("be quiet" still mutes it)
+brightness                   = 63     # screen brightness, 0-100
+dim_brightness               = 8      # brightness while dozing, 0-100
+
+# --- Sleepiness ---
+sleep_after_seconds          = 60     # doze off after this long with nothing happening
+dim_after_seconds            = 180    # dim the screen after this long
+sleep_after_leaving_seconds  = 20     # doze sooner once you walk away
+
+# --- Voice ---
+command_confidence           = 0      # 0-1; raise to 0.3 or so if it reacts to things you didn't say
+
+# Extra ways to say a command, separated by commas. Letters and spaces only.
+# Remove the # in front of a line to use it. Commands you can add to:
+#  say.hello  say.good_night  say.wake_up  say.how_are_you  say.i_love_you
+#  say.good_job  say.scold  say.thank_you  say.tell_joke  say.look_left
+#  say.look_right  say.be_happy  say.be_sad  say.be_angry  say.be_surprised
+#  say.be_quiet  say.sound_on
+# say.hello = howdy, whats up buddy
+# say.good_night = nighty night
+
+# --- Camera ---
+face_tracking                = on     # eyes follow your face
+camera_mirrored              = off    # turn on if the eyes look away from you instead of at you
+face_gaze                    = 1.4    # how far the eyes turn toward you, 0-3
+
+# --- Proximity sensor (above the screen) ---
+proximity                    = on     # wake up when you sit down
+proximity_sensitivity        = 25     # lower notices you from further away (but more false alarms)
+
+# --- Motion ---
+flip_tilt_x                  = off    # turn on if tilting left/right makes the eyes go the wrong way
+flip_tilt_y                  = off    # same for tilting forward/back

@@ -1,7 +1,12 @@
 #pragma once
 #include <stdint.h>
+#include <string>
+#include <utility>
+#include <vector>
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+
+#include "Companion.h"  // VoiceCommand
 
 // Offline speech pipeline (Espressif ESP-SR):
 //   CoreS3 mics (both, as stereo) -> audio front-end (source separation, voice activity,
@@ -20,7 +25,9 @@ bool voiceMicBegin();
 
 // Loads the models and starts the pipeline (takes a few seconds). Call after
 // voiceMicBegin(). Returns false if the speech models are missing or memory ran out.
-bool voiceStart(QueueHandle_t events);
+// `extraPhrases` (from settings.txt) are added to the built-in phrase list.
+bool voiceStart(QueueHandle_t events,
+                const std::vector<std::pair<VoiceCommand, std::string>>& extraPhrases = {});
 
 // Latest audio level in dBFS and whether someone seems to be talking.
 // Safe to call from any task.

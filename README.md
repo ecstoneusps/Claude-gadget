@@ -106,15 +106,18 @@ main/sound.cpp         Plays sound effects, switching the audio hardware mic <->
 main/proximity.cpp     LTR-553 proximity sensor driver (presence logic is in components/companion/Presence.*)
 main/camera.cpp        Camera setup and face detection task
 main/settings.cpp      Settings kept across restarts in flash (NVS): currently mute
+main/sdcard.cpp        microSD card (shares the display's SPI bus)
+components/config/     settings.txt parser and the default file (portable C++)
+sdcard/                Files for the SD card: settings.txt as written to a fresh card
 components/espdl_all_ops/  Build helper: makes esp-dl compile every neural-network op the face model may need
 tests/                 Native unit tests for the brain (run on a PC)
 tools/preview/         Renders the face to PNG/GIF on a PC
-partitions.csv         Flash layout (4 MB app + 8 MB speech models; ~2.8 MB and ~3.1 MB used)
+partitions.csv         Flash layout (4 MB app + 8 MB speech models; ~2.9 MB and ~3.1 MB used)
 sdkconfig.defaults     Board, PSRAM and speech model settings
 ```
 
-`components/face`, `components/companion` and `components/sfx` contain no ESP32
-code, so they build and run on a PC for testing and previews.
+`components/face`, `components/companion`, `components/sfx` and `components/config`
+contain no ESP32 code, so they build and run on a PC for testing and previews.
 
 ## Build and flash
 
@@ -161,27 +164,48 @@ build used. Commit it to the repo root to pin those versions for future builds.
 ## Tests and preview (on a PC)
 
 ```
-tests/run_tests.sh                      # unit tests for the brain (needs g++)
+tests/run_tests.sh                      # unit tests for the brain and settings parser (needs g++)
 python3 tools/preview/make_preview.py   # face images + sound WAVs (needs g++ and Pillow)
 ```
 
-## Tuning
+## Settings (microSD card)
+
+Put a FAT32-formatted microSD card in the slot on the side. On its first start
+with the card, the buddy writes a commented **`settings.txt`** to it (the same
+file as [`sdcard/settings.txt`](sdcard/settings.txt) in this repo, which you can
+also copy onto the card yourself). Edit it on your computer, put the card back,
+and restart the buddy.
+
+| Setting | What it changes |
+|---|---|
+| `volume`, `brightness`, `dim_brightness` | Speaker and screen levels, 0-100 |
+| `sleep_after_seconds`, `dim_after_seconds`, `sleep_after_leaving_seconds` | How quickly it gets sleepy and dims |
+| `command_confidence` | Raise to around 0.3 if it reacts to things you didn't say. The serial log shows each command's confidence |
+| `say.<command> = phrase, phrase` | Extra ways to say any command, e.g. `say.hello = howdy, whats up buddy` |
+| `face_tracking`, `camera_mirrored`, `face_gaze` | Camera on/off, fix eyes that look away from you, how far they turn |
+| `proximity`, `proximity_sensitivity` | Proximity sensor on/off; lower sensitivity numbers notice you from further away |
+| `flip_tilt_x`, `flip_tilt_y` | Fix tilt reactions that go the wrong way |
+
+Mistakes, such as a typo or an out-of-range number, are listed in the serial log,
+and that line is ignored. Without a card, it uses the built-in defaults. The
+mute setting ("be quiet" / "sound on") is kept in the board's own flash and
+works without a card.
+
+## Tuning in code
 
 - **Expressions:** `paramsFor()` in `components/face/Face.cpp`.
 - **Reactions:** `Companion::onCommand()` and the tunables in `components/companion/Companion.h`.
-- **Wrong commands get triggered:** raise `kMinCommandProb` in `main/main.cpp`. The
-  serial log shows the confidence of each command it hears.
+- **Built-in phrases:** `kCommandPhrases` in `components/companion/Companion.cpp`.
+- **Default settings:** `components/config/BuddyConfig.h`. After changing one, run
+  `tests/run_tests.sh --write-settings` to refresh `sdcard/settings.txt`.
 - **Different wake word:** run `idf.py menuconfig` → *ESP Speech Recognition* →
   *Load Multiple Wake Words*. Choose one, such as "Hi M Five", "Jarvis" or "Computer",
   and turn off "Hey Buddy".
 - **Doesn't notice you sitting down:** the proximity sensor (just above the screen)
   is infrared and short-range, roughly a hand's length to an arm's length depending on
   what you're wearing. The serial log prints `prox <reading>, baseline <empty desk>`
-  every 10 seconds. Compare the numbers with you seated and away, then lower `minRise`
-  / `riseFraction` in `components/companion/Presence.h`, or angle the buddy toward you.
-- **Eyes look away from you instead of at you:** set `kCameraMirrored = true` in
-  `main/main.cpp`. To make them turn further or less far toward you, change `kFaceGazeGain`.
-- **Tilt goes the wrong way:** flip the signs of `tx` / `ty` in `handleImu()` in `main/main.cpp`.
+  every 10 seconds. Compare the numbers with you seated and away, then lower
+  `proximity_sensitivity` in settings.txt, or angle the buddy toward you.
 
 ## Roadmap
 
@@ -194,4 +218,6 @@ python3 tools/preview/make_preview.py   # face images + sound WAVs (needs g++ an
 7. ~~Proximity sensor: wake up when someone sits down~~
 8. ~~Camera: look toward your face~~
 9. ~~Remember the mute setting across restarts~~
-10. Cloud conversation: speech-to-text → LLM → emotion tag drives the face, with spoken replies
+10. ~~Settings file on the SD card~~
+11. Recognize you (face recognition, enrolled face stored on the card)
+12. Cloud conversation: speech-to-text → LLM → emotion tag drives the face, with spoken replies

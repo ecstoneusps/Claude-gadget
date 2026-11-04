@@ -8,7 +8,7 @@
 
 static const char* TAG = "sound";
 
-static constexpr uint8_t kVolume = 160;          // 0..255
+static uint8_t s_volume = 160;                   // 0..255, set from settings.txt
 static constexpr uint32_t kPauseTimeoutMs = 300; // don't wait forever for the mic to park
 
 static int16_t* s_pcm[(int)Sfx::Count];
@@ -33,8 +33,13 @@ void soundInit() {
         sfxRender(s, s_pcm[i]);
         total += s_len[i] * sizeof(int16_t);
     }
-    M5.Speaker.setVolume(kVolume);
+    M5.Speaker.setVolume(s_volume);
     ESP_LOGI(TAG, "rendered %d effects, %u KB", (int)Sfx::Count - 1, (unsigned)(total / 1024));
+}
+
+void soundSetVolume(uint8_t volume) {
+    s_volume = volume;
+    M5.Speaker.setVolume(volume);
 }
 
 void soundPlay(Sfx s) {

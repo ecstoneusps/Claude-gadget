@@ -169,7 +169,8 @@ static bool createAfe(srmodel_list_t* models, const char* format) {
     return true;
 }
 
-bool voiceStart(QueueHandle_t events) {
+bool voiceStart(QueueHandle_t events,
+                const std::vector<std::pair<VoiceCommand, std::string>>& extraPhrases) {
     s_events = events;
 
     srmodel_list_t* models = esp_srmodel_init("model");
@@ -205,12 +206,18 @@ bool voiceStart(QueueHandle_t events) {
         if (esp_mn_commands_add((int)kCommandPhrases[i].command, kCommandPhrases[i].text) != ESP_OK)
             ESP_LOGW(TAG, "could not add phrase \"%s\"", kCommandPhrases[i].text);
     }
+    for (const auto& [cmd, text] : extraPhrases) {
+        if (esp_mn_commands_add((int)cmd, text.c_str()) == ESP_OK)
+            ESP_LOGI(TAG, "extra phrase \"%s\" -> %s", text.c_str(), commandName(cmd));
+        else
+            ESP_LOGW(TAG, "could not add extra phrase \"%s\"", text.c_str());
+    }
     esp_mn_error_t* err = esp_mn_commands_update();
     if (err) {
         for (int i = 0; i < err->num; ++i) ESP_LOGW(TAG, "rejected phrase: %s", err->phrases[i]->string);
     }
     s_mn->print_active_speech_commands(s_mnData);
-    ESP_LOGI(TAG, "MultiNet %s ready, %d phrases", mnName, kCommandPhraseCount);
+    ESP_LOGI(TAG, "MultiNet %s ready, %d phrases", mnName, kCommandPhraseCount + (int)extraPhrases.size());
 
     xTaskCreatePinnedToCore(feedTask, "sr_feed", 4096, nullptr, 5, nullptr, 0);
     xTaskCreatePinnedToCore(detectTask, "sr_detect", 8192, nullptr, 5, nullptr, 0);

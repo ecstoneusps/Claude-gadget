@@ -6,5 +6,6 @@
 // the UI task only (it owns the I2C bus used to switch mic <-> speaker).
 
 void soundInit();                 // pre-renders every effect into PSRAM
+void soundSetVolume(uint8_t volume);  // 0..255
 void soundPlay(Sfx s);            // queue a sound (the newest request wins)
 void soundUpdate(uint32_t nowMs); // drive playback; call every loop

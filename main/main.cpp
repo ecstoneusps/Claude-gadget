@@ -8,6 +8,8 @@
 //   main/proximity.cpp    proximity sensor: notices you sitting down
 //   main/camera.cpp       camera + face detection: looks at you
 //   main/settings.cpp     settings kept across restarts (mute)
+//   main/sdcard.cpp       microSD card; settings.txt is read from it at startup
+//   components/config     parses settings.txt (portable, unit-tested)
 //   this file             hardware glue: display, touch, IMU, battery, main loop
 
 #include <math.h>
@@ -21,11 +23,13 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
+#include "BuddyConfig.h"
 #include "Companion.h"
 #include "Face.h"
 #include "Presence.h"
 #include "camera.h"
 #include "proximity.h"
+#include "sdcard.h"
 #include "settings.h"
 #include "sound.h"
 #include "voice.h"
@@ -33,16 +37,15 @@
 static const char* TAG = "main";
 
 constexpr uint32_t kFrameMs = 33;   // ~30 fps
-constexpr uint8_t kBrightness = 160;
-constexpr uint8_t kDimBrightness = 20;
 constexpr float kShakeG = 1.0f;     // deviation from 1 g that counts as a shake
 constexpr float kTiltG = 0.25f;     // tilt (vs. resting pose) before the eyes follow
-constexpr float kMinCommandProb = 0.0f;  // raise to reject low-confidence commands
-// Camera image -> gaze. With the camera facing you, stepping to your right moves
-// you to the left of the image, and the eyes should then turn to *your* right
-// (the screen's right). If the eyes look away from you instead, set this to true.
-constexpr bool kCameraMirrored = false;
-constexpr float kFaceGazeGain = 1.4f;    // how far the eyes turn toward a face near the frame edge
+
+// Everything adjustable lives in settings.txt on the SD card (see
+// components/config/BuddyConfig.h for the defaults used without a card).
+static BuddyConfig config;
+static constexpr const char* kSettingsFile = "settings.txt";
+
+static uint8_t percentTo255(int pct) { return (uint8_t)(pct * 255 / 100); }
 
 static uint32_t nowMs() { return (uint32_t)(esp_timer_get_time() / 1000); }
 
@@ -100,8 +103,9 @@ static void handleImu(uint32_t now) {
     const float mag = sqrtf(ax * ax + ay * ay + az * az);
     if (fabsf(mag - 1.0f) > kShakeG) buddy.onShake(now);
 
-    // If the eyes look the wrong way on your unit, flip these signs.
-    const float tx = -(ax - restX), ty = (ay - restY);
+    // If the eyes look the wrong way on your unit, flip_tilt_x / flip_tilt_y in settings.txt.
+    const float tx = (config.flipTiltX ? 1 : -1) * (ax - restX);
+    const float ty = (config.flipTiltY ? -1 : 1) * (ay - restY);
     if (fabsf(tx) > kTiltG || fabsf(ty) > kTiltG) {
         buddy.onTilt(fminf(fmaxf(tx * 1.5f, -1), 1), fminf(fmaxf(ty * 1.5f, -1), 1), now);
         tilted = true;
@@ -113,8 +117,9 @@ static void handleImu(uint32_t now) {
 
 // Proximity: greet you when you sit down, doze sooner when you leave.
 // Logs the raw reading every 10 s so the thresholds can be tuned.
+static PresenceDetector presence;
+
 static void handleProximity(uint32_t now, bool sensorOk) {
-    static PresenceDetector presence;
     static uint32_t lastRead = 0, lastLog = 0;
     if (!sensorOk || now - lastRead < 50) return;
     lastRead = now;
@@ -151,8 +156,10 @@ static void handleFace(uint32_t now) {
     if (f.seq == lastSeq) return;
     lastSeq = f.seq;
     if (!f.found) return;
-    const float gx = (kCameraMirrored ? f.x : -f.x) * kFaceGazeGain;
-    const float gy = f.y * kFaceGazeGain;
+    // With the camera facing you, stepping to your right moves you to the left of
+    // the image, and the eyes should turn to *your* right (the screen's right).
+    const float gx = (config.cameraMirrored ? f.x : -f.x) * config.faceGaze;
+    const float gy = f.y * config.faceGaze;
     buddy.onFace(fminf(fmaxf(gx, -1), 1), fminf(fmaxf(gy, -1), 1), now);
 }
 
@@ -167,7 +174,7 @@ static void handleVoice(uint32_t now) {
                 buddy.onWakeWord(now);
                 break;
             case VoiceEvent::Command:
-                if (ev.prob >= kMinCommandProb) {
+                if (ev.prob >= config.commandConfidence) {
                     ESP_LOGI(TAG, "-> %s", commandName((VoiceCommand)ev.commandId));
                     buddy.onCommand((VoiceCommand)ev.commandId, now);
                 } else {
@@ -184,13 +191,38 @@ static void handleVoice(uint32_t now) {
 // Loading the speech models takes a few seconds, so do it off the UI task
 // and let the face animate meanwhile.
 static void voiceInitTask(void*) {
-    if (voiceStart(voiceEvents)) voiceOk.store(true);
+    if (voiceStart(voiceEvents, config.extraPhrases)) voiceOk.store(true);
     else ESP_LOGW(TAG, "voice disabled; touch and motion still work");
     vTaskDelete(nullptr);
 }
 
+// Reads settings.txt from the SD card, writing a commented default file the
+// first time so every option is easy to find. Without a card: built-in defaults.
+static void loadSettings() {
+    if (sdcardMount()) {
+        std::string text;
+        if (sdcardReadFile(kSettingsFile, text)) {
+            std::vector<std::string> warnings;
+            parseConfig(text, config, warnings);
+            for (const auto& w : warnings) ESP_LOGW(TAG, "settings.txt %s", w.c_str());
+            ESP_LOGI(TAG, "settings.txt loaded%s", warnings.empty() ? "" : " (some lines ignored)");
+        } else if (sdcardWriteFile(kSettingsFile, defaultConfigText())) {
+            ESP_LOGI(TAG, "wrote a default settings.txt to the SD card");
+        } else {
+            ESP_LOGW(TAG, "could not read or create settings.txt");
+        }
+    }
+    buddy.sleepAfterMs = config.sleepAfterSeconds * 1000u;
+    buddy.dimAfterMs = config.dimAfterSeconds * 1000u;
+    buddy.sleepAfterLeftMs = config.sleepAfterLeavingSeconds * 1000u;
+    presence.minRise = (float)config.proximitySensitivity;
+    ESP_LOGI(TAG, "volume %d%%, brightness %d%%, sleep after %ds, face tracking %s, proximity %s",
+             config.volume, config.brightness, config.sleepAfterSeconds,
+             config.faceTracking ? "on" : "off", config.proximity ? "on" : "off");
+}
+
 static void uiTask(void*) {
-    const bool proxOk = proximityBegin();
+    const bool proxOk = config.proximity && proximityBegin();
     uint32_t lastFrame = nowMs(), lastBattery = 0, lastImu = 0;
     bool dimmed = false;
     while (true) {
@@ -220,7 +252,7 @@ static void uiTask(void*) {
         soundUpdate(now);
         if (buddy.wantsDim() != dimmed) {
             dimmed = buddy.wantsDim();
-            M5.Display.setBrightness(dimmed ? kDimBrightness : kBrightness);
+            M5.Display.setBrightness(percentTo255(dimmed ? config.dimBrightness : config.brightness));
         }
 
         if (now - lastFrame >= kFrameMs) {
@@ -237,7 +269,8 @@ extern "C" void app_main(void) {
     auto cfg = M5.config();
     M5.begin(cfg);
     M5.Display.setRotation(1);  // landscape, 320x240
-    M5.Display.setBrightness(kBrightness);
+    loadSettings();
+    M5.Display.setBrightness(percentTo255(config.brightness));
 
     canvas.setColorDepth(16);
     canvas.setPsram(true);
@@ -254,10 +287,11 @@ extern "C" void app_main(void) {
     const bool cameraOk = cameraBegin();  // before other tasks touch the I2C bus
     const bool micOk = voiceMicBegin();
     soundInit();
+    soundSetVolume(percentTo255(config.volume));
 
     // Speech runs on core 0; drawing and input get core 1.
     xTaskCreatePinnedToCore(uiTask, "ui", 8192, nullptr, 4, nullptr, 1);
-    if (cameraOk) faceTrackingStart();
+    if (cameraOk && config.faceTracking) faceTrackingStart();
     if (micOk) xTaskCreatePinnedToCore(voiceInitTask, "sr_init", 8192, nullptr, 3, nullptr, 0);
     ESP_LOGI(TAG, "desk companion started");
 }
