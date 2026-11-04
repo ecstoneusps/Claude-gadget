@@ -132,17 +132,48 @@ void Companion::onTilt(float x, float y, uint32_t now) {
 
 void Companion::onTiltEnd() { tilted_ = false; }
 
+void Companion::greet(uint32_t now) {
+    // Not every time a hand waves past the sensor.
+    if (greeted_ && now - lastGreeting_ <= 15000) return;
+    reactionUntil_ = now;
+    react(Expression::Happy, 2500, now);
+    if (!seesFace(now)) look(0, -0.3f, 1500, now);  // look up toward where you probably are
+    play(Sfx::Happy, now);
+    lastGreeting_ = now;
+    greeted_ = true;
+}
+
 void Companion::onArrived(uint32_t now) {
     if (awaiting_) return;  // mid-conversation; don't interrupt
     interact(now, true);    // wakes it, even from "good night"
-    // Greet -- but not every time a hand waves past the sensor.
-    if (!greeted_ || now - lastGreeting_ > 15000) {
-        reactionUntil_ = now;
-        react(Expression::Happy, 2500, now);
-        look(0, -0.3f, 1500, now);  // look up at you
-        play(Sfx::Happy, now);
-        lastGreeting_ = now;
-        greeted_ = true;
+    greet(now);
+}
+
+bool Companion::seesFace(uint32_t now) const {
+    return faceSeen_ && now - lastFace_ < faceLostMs;
+}
+
+void Companion::onFace(float x, float y, uint32_t now) {
+    const bool returning = !faceSeen_ || now - lastFace_ > faceAwayMs;
+    // Smooth out detector jitter; jump straight there when a face first appears.
+    if (!seesFace(now)) {
+        faceX_ = x;
+        faceY_ = y;
+    } else {
+        faceX_ += (x - faceX_) * 0.5f;
+        faceY_ += (y - faceY_) * 0.5f;
+    }
+    faceSeen_ = true;
+    lastFace_ = now;
+
+    // You came back into view: wake up and say hi -- but if you said
+    // "good night", it keeps sleeping even though it can see you.
+    if (returning && !asleep_ && !awaiting_) {
+        const bool dozing = now - lastInteraction_ > sleepAfterMs;
+        if (dozing) {
+            interact(now, true);
+            greet(now);
+        }
     }
 }
 
@@ -271,11 +302,13 @@ void Companion::update(uint32_t now) {
     if (awaiting_) want = Expression::Listening;
     if (want != face_.expression()) face_.setExpression(want);
 
-    // Gaze priority: commanded look > attentive (awaiting) > tilt > wander.
+    // Gaze priority: commanded look > your face > attentive (awaiting) > tilt > wander.
     bool override = true;
     float gx = 0, gy = 0;
     if (before(now, lookUntil_)) {
         gx = lookX_; gy = lookY_;
+    } else if (seesFace(now) && !asleep_) {
+        gx = faceX_; gy = faceY_;
     } else if (awaiting_) {
         gx = 0; gy = 0;
     } else if (tilted_) {

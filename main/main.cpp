@@ -6,6 +6,7 @@
 //   main/voice.cpp        offline speech: "Hey Buddy" wake word + commands
 //   main/sound.cpp        sound effects through the speaker
 //   main/proximity.cpp    proximity sensor: notices you sitting down
+//   main/camera.cpp       camera + face detection: looks at you
 //   this file             hardware glue: display, touch, IMU, battery, main loop
 
 #include <math.h>
@@ -22,6 +23,7 @@
 #include "Companion.h"
 #include "Face.h"
 #include "Presence.h"
+#include "camera.h"
 #include "proximity.h"
 #include "sound.h"
 #include "voice.h"
@@ -34,6 +36,11 @@ constexpr uint8_t kDimBrightness = 20;
 constexpr float kShakeG = 1.0f;     // deviation from 1 g that counts as a shake
 constexpr float kTiltG = 0.25f;     // tilt (vs. resting pose) before the eyes follow
 constexpr float kMinCommandProb = 0.0f;  // raise to reject low-confidence commands
+// Camera image -> gaze. With the camera facing you, stepping to your right moves
+// you to the left of the image, and the eyes should then turn to *your* right
+// (the screen's right). If the eyes look away from you instead, set this to true.
+constexpr bool kCameraMirrored = false;
+constexpr float kFaceGazeGain = 1.4f;    // how far the eyes turn toward a face near the frame edge
 
 static uint32_t nowMs() { return (uint32_t)(esp_timer_get_time() / 1000); }
 
@@ -131,6 +138,22 @@ static void handleProximity(uint32_t now, bool sensorOk) {
     }
 }
 
+// Camera: steer the eyes toward your face.
+static void handleFace(uint32_t now) {
+    // Look often while awake, now and then while dozing (seeing you wakes it),
+    // and not at all after "good night".
+    faceTrackingSetInterval(buddy.isAsleep() ? 0 : buddy.wantsDim() ? 1000 : 200);
+
+    static uint32_t lastSeq = 0;
+    const FaceSighting f = faceTrackingLatest();
+    if (f.seq == lastSeq) return;
+    lastSeq = f.seq;
+    if (!f.found) return;
+    const float gx = (kCameraMirrored ? f.x : -f.x) * kFaceGazeGain;
+    const float gy = f.y * kFaceGazeGain;
+    buddy.onFace(fminf(fmaxf(gx, -1), 1), fminf(fmaxf(gy, -1), 1), now);
+}
+
 static void handleVoice(uint32_t now) {
     if (!voiceOk.load()) return;
     buddy.onAudio(voiceLevelDb(), voiceSpeech(), now);
@@ -178,6 +201,7 @@ static void uiTask(void*) {
         }
         handleVoice(now);
         handleProximity(now, proxOk);
+        handleFace(now);
 
         if (lastBattery == 0 || now - lastBattery > 10000) {
             lastBattery = now;
@@ -218,11 +242,13 @@ extern "C" void app_main(void) {
 
     face.setSeed(esp_random());
     voiceEvents = xQueueCreate(8, sizeof(VoiceEvent));
+    const bool cameraOk = cameraBegin();  // before other tasks touch the I2C bus
     const bool micOk = voiceMicBegin();
     soundInit();
 
     // Speech runs on core 0; drawing and input get core 1.
     xTaskCreatePinnedToCore(uiTask, "ui", 8192, nullptr, 4, nullptr, 1);
+    if (cameraOk) faceTrackingStart();
     if (micOk) xTaskCreatePinnedToCore(voiceInitTask, "sr_init", 8192, nullptr, 3, nullptr, 0);
     ESP_LOGI(TAG, "desk companion started");
 }

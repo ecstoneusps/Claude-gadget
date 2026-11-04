@@ -56,6 +56,12 @@ public:
     void onArrived(uint32_t now);
     void onLeft(uint32_t now);
 
+    // Camera: a face is visible at (x, y), each -1..1 in the buddy's own gaze
+    // directions (x: -1 = look left, +1 = look right; y: -1 = up, +1 = down).
+    // Call for every camera frame that contains a face.
+    void onFace(float x, float y, uint32_t now);
+    bool seesFace(uint32_t now) const;
+
     // Audio: called for every processed audio frame.
     void onAudio(float levelDb, bool speech, uint32_t now);
 
@@ -89,6 +95,8 @@ public:
     float clapMinDb = -30.0f;     // ...and it must be at least this loud
     uint32_t speechEndMs = 1200;  // quiet this long = they stopped talking
     uint32_t sleepAfterLeftMs = 20000;  // doze off sooner once you walk away
+    uint32_t faceLostMs = 1500;         // keep looking where the face was this long
+    uint32_t faceAwayMs = 10000;        // face gone this long, then seeing it again greets you
 
 private:
     void react(Expression e, uint32_t ms, uint32_t now);
@@ -130,5 +138,10 @@ private:
     bool petting_ = false, shaking_ = false;
     bool idleSleepy_ = false;   // already yawned for this idle stretch
     uint32_t lastGreeting_ = 0;
+    void greet(uint32_t now);
+
+    bool faceSeen_ = false;
+    uint32_t lastFace_ = 0;
+    float faceX_ = 0, faceY_ = 0;
     bool greeted_ = false;
 };

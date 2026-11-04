@@ -53,6 +53,9 @@ public:
     // Override the wandering gaze. x,y in -1..1. Call clearLookAt() to resume wandering.
     void setLookAt(float x, float y);
     void clearLookAt();
+    bool isLookOverridden() const { return lookOverride_; }
+    float lookTargetX() const { return lookTX_; }
+    float lookTargetY() const { return lookTY_; }
 
     // 0..1 mouth movement while the device is talking (from audio level).
     void setTalkLevel(float level) { talkTarget_ = level; }

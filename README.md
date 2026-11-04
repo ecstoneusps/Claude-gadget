@@ -73,6 +73,8 @@ hear itself. Volume is `kVolume` in `main/sound.cpp`.
 |---|---|
 | Sit down in front of it (or wave near the top of the screen) | Wakes up, looks up at you and says hello |
 | Walk away | Dozes off after about 20 seconds instead of a minute |
+| Move around in front of it | Its eyes follow your face (camera) |
+| Come back into view while it's dozing | Wakes up and says hello (camera) |
 | Tap the screen | Happy |
 | Hold a finger on it ("petting") | Love eyes and blush |
 | Shake it | Confused / dizzy |
@@ -82,6 +84,15 @@ hear itself. Volume is `kVolume` in `main/sound.cpp`.
 | Leave it alone for 1 minute | Gets sleepy |
 | Leave it alone for 3 minutes | Dims the screen |
 | Let the battery drop below 10% | Stays sleepy until charged |
+
+## Camera
+
+The CoreS3's camera, a GC0308 above the screen, runs Espressif's
+[face detection model](https://github.com/espressif/esp-dl/tree/master/models/human_face_detect)
+on the device: 5 frames a second while awake, 1 while dozing, and none after
+"good night". The eyes turn toward the biggest face it sees. **Images never leave
+the device and are never stored.** Each frame is analyzed in memory and
+discarded. The serial log prints the face position every few seconds.
 
 ## Project layout
 
@@ -93,9 +104,11 @@ main/main.cpp          CoreS3 glue: display, touch, IMU, battery, main loop
 main/voice.cpp         ESP-SR pipeline: mic -> audio front-end -> wake word -> commands
 main/sound.cpp         Plays sound effects, switching the audio hardware mic <-> speaker
 main/proximity.cpp     LTR-553 proximity sensor driver (presence logic is in components/companion/Presence.*)
+main/camera.cpp        Camera setup and face detection task
+components/espdl_all_ops/  Build helper: makes esp-dl compile every neural-network op the face model may need
 tests/                 Native unit tests for the brain (run on a PC)
 tools/preview/         Renders the face to PNG/GIF on a PC
-partitions.csv         Flash layout (4 MB app + 8 MB speech models; ~1.8 MB and ~3.1 MB used)
+partitions.csv         Flash layout (4 MB app + 8 MB speech models; ~2.8 MB and ~3.1 MB used)
 sdkconfig.defaults     Board, PSRAM and speech model settings
 ```
 
@@ -165,6 +178,8 @@ python3 tools/preview/make_preview.py   # face images + sound WAVs (needs g++ an
   what you're wearing. The serial log prints `prox <reading>, baseline <empty desk>`
   every 10 seconds. Compare the numbers with you seated and away, then lower `minRise`
   / `riseFraction` in `components/companion/Presence.h`, or angle the buddy toward you.
+- **Eyes look away from you instead of at you:** set `kCameraMirrored = true` in
+  `main/main.cpp`. To make them turn further or less far toward you, change `kFaceGazeGain`.
 - **Tilt goes the wrong way:** flip the signs of `tx` / `ty` in `handleImu()` in `main/main.cpp`.
 
 ## Roadmap
@@ -176,6 +191,6 @@ python3 tools/preview/make_preview.py   # face images + sound WAVs (needs g++ an
 5. ~~Use both microphones for better pickup across a room~~
 6. ~~Sound effects through the speaker (chirps, giggles, yawns)~~
 7. ~~Proximity sensor: wake up when someone sits down~~
-8. Camera: recognize that it's you, look toward your face
+8. ~~Camera: look toward your face~~
 9. Remember the mute setting across restarts
 10. Cloud conversation: speech-to-text → LLM → emotion tag drives the face, with spoken replies

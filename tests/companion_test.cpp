@@ -357,6 +357,65 @@ static void test_walking_away_dozes_sooner() {
     CHECK(r.expr() == Expression::Sleepy);  // ~20 s after leaving, not 60
 }
 
+static void test_eyes_follow_face() {
+    Rig r;
+    r.c.onTap(r.now);
+    r.c.onFace(0.6f, -0.2f, r.now);
+    r.run(33);
+    CHECK(r.face.isLookOverridden());
+    CHECK(r.face.lookTargetX() > 0.5f && r.face.lookTargetY() < 0);
+    for (int i = 0; i < 10; ++i) {        // you move to the other side
+        r.c.onFace(-0.6f, 0.0f, r.now);
+        r.run(33);
+    }
+    CHECK(r.face.lookTargetX() < -0.5f);
+    r.run(2000);                          // you leave the frame
+    CHECK(!r.face.isLookOverridden());    // back to glancing around
+}
+
+static void test_look_command_beats_face() {
+    Rig r;
+    r.c.onWakeWord(r.now);
+    r.c.onFace(0.5f, 0, r.now);
+    r.run(33);
+    CHECK(r.face.lookTargetX() > 0.4f);   // listening, looking at you
+    r.c.onCommand(VoiceCommand::LookLeft, r.now);
+    r.c.onFace(0.5f, 0, r.now);
+    r.run(33);
+    CHECK(r.face.lookTargetX() < -0.9f);  // obeys "look left" first
+}
+
+static void test_seeing_face_wakes_dozing_buddy() {
+    Rig r;
+    r.run(70000);
+    CHECK(r.expr() == Expression::Sleepy);
+    r.c.takeSound();
+    r.c.onFace(0, 0, r.now);
+    r.run(100);
+    CHECK(r.expr() == Expression::Happy);
+    CHECK(r.c.takeSound() == Sfx::Happy);
+}
+
+static void test_face_does_not_override_good_night() {
+    Rig r;
+    r.c.onWakeWord(r.now);
+    r.c.onCommand(VoiceCommand::GoodNight, r.now);
+    for (int i = 0; i < 30; ++i) {
+        r.c.onFace(0.3f, 0, r.now);
+        r.run(200);
+    }
+    CHECK(r.c.isAsleep());
+    CHECK(r.expr() == Expression::Sleepy);
+}
+
+static void test_face_while_awake_does_not_regreet() {
+    Rig r;
+    r.c.onTap(r.now);
+    r.c.takeSound();
+    r.c.onFace(0, 0, r.now);
+    CHECK(r.c.takeSound() == Sfx::None);  // already awake: just looks at you
+}
+
 int main() {
     struct { const char* name; void (*fn)(); } tests[] = {
         {"tap makes happy then neutral", test_tap_makes_happy_then_neutral},
@@ -382,6 +441,11 @@ int main() {
         {"sitting down wakes and greets", test_sitting_down_wakes_and_greets},
         {"good night then sit down wakes", test_good_night_then_sit_down_wakes},
         {"walking away dozes sooner", test_walking_away_dozes_sooner},
+        {"eyes follow face", test_eyes_follow_face},
+        {"look command beats face", test_look_command_beats_face},
+        {"seeing face wakes dozing buddy", test_seeing_face_wakes_dozing_buddy},
+        {"face does not override good night", test_face_does_not_override_good_night},
+        {"face while awake does not re-greet", test_face_while_awake_does_not_regreet},
     };
     for (auto& t : tests) {
         int before = failures;

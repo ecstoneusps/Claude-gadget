@@ -2,3 +2,5 @@ dependencies:
   idf: ">=5.1"
   espressif/esp-sr: "^2.6.0"
   m5stack/m5unified: "^0.2.29"
+  espressif/esp32-camera: "^2.1.8"
+  espressif/human_face_detect: "^0.5.1"
