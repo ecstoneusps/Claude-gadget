@@ -416,6 +416,55 @@ static void test_face_while_awake_does_not_regreet() {
     CHECK(r.c.takeSound() == Sfx::None);  // already awake: just looks at you
 }
 
+static void test_every_ai_emotion_maps_to_an_expression() {
+    // xiaozhi-esp32's full emotion vocabulary.
+    const char* names[] = {"neutral", "happy", "laughing", "funny", "sad", "angry", "crying",
+                           "loving", "embarrassed", "surprised", "shocked", "thinking", "winking",
+                           "cool", "relaxed", "delicious", "kissy", "confident", "sleepy", "silly",
+                           "confused"};
+    CHECK(kEmotionNameCount == 21);
+    for (const char* n : names) {
+        Expression e;
+        if (!expressionForEmotion(n, e)) printf("  no expression for \"%s\"\n", n);
+        CHECK(expressionForEmotion(n, e));
+    }
+    Expression e;
+    CHECK(expressionForEmotion("laughing", e) && e == Expression::Laughing);
+    CHECK(expressionForEmotion("kissy", e) && e == Expression::Love);
+    CHECK(expressionForEmotion("listening", e) && e == Expression::Listening);  // our own names too
+    CHECK(!expressionForEmotion("grumpy", e));
+    CHECK(!expressionForEmotion(nullptr, e));
+}
+
+static void test_expression_names_unique() {
+    for (int i = 0; i < (int)Expression::Count; ++i)
+        for (int j = i + 1; j < (int)Expression::Count; ++j)
+            CHECK(strcmp(expressionName((Expression)i), expressionName((Expression)j)) != 0);
+}
+
+static void test_on_emotion_shows_face_and_sound() {
+    Rig r;
+    CHECK(r.c.onEmotion("crying", r.now, 3000));
+    r.run(100);
+    CHECK(r.expr() == Expression::Crying);
+    CHECK(r.c.takeSound() == Sfx::Sad);
+    r.run(3500);
+    CHECK(r.expr() == Expression::Neutral);
+    CHECK(!r.c.onEmotion("grumpy", r.now));
+    CHECK(r.c.takeSound() == Sfx::None);
+}
+
+static void test_new_face_commands() {
+    Rig r;
+    r.c.onWakeWord(r.now);
+    r.c.onCommand(VoiceCommand::Wink, r.now);
+    r.run(100);
+    CHECK(r.expr() == Expression::Winking);
+    r.c.onCommand(VoiceCommand::BeSilly, r.now);
+    r.run(100);
+    CHECK(r.expr() == Expression::Silly);
+}
+
 int main() {
     struct { const char* name; void (*fn)(); } tests[] = {
         {"tap makes happy then neutral", test_tap_makes_happy_then_neutral},
@@ -446,6 +495,10 @@ int main() {
         {"seeing face wakes dozing buddy", test_seeing_face_wakes_dozing_buddy},
         {"face does not override good night", test_face_does_not_override_good_night},
         {"face while awake does not re-greet", test_face_while_awake_does_not_regreet},
+        {"every AI emotion maps to an expression", test_every_ai_emotion_maps_to_an_expression},
+        {"expression names unique", test_expression_names_unique},
+        {"onEmotion shows face and sound", test_on_emotion_shows_face_and_sound},
+        {"new face commands", test_new_face_commands},
     };
     for (auto& t : tests) {
         int before = failures;

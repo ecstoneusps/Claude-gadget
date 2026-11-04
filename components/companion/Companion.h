@@ -24,6 +24,9 @@ enum class VoiceCommand : int {
     BeSurprised,
     BeQuiet,
     SoundOn,
+    Wink,
+    BeCool,
+    BeSilly,
     Count
 };
 
@@ -69,6 +72,11 @@ public:
     void onWakeWord(uint32_t now);
     void onCommand(VoiceCommand cmd, uint32_t now);
     void onCommandTimeout(uint32_t now);
+
+    // Show a named emotion ("laughing", "thinking", ... see kEmotionNames in
+    // Face.h) for `ms`, with a matching sound. For an AI server that tags its
+    // replies with emotions. Returns false for unknown names.
+    bool onEmotion(const char* emotion, uint32_t now, uint32_t ms = 4000);
 
     void setLowBattery(bool low) { lowBattery_ = low; }
 

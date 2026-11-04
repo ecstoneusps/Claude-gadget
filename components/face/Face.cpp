@@ -1,5 +1,6 @@
 #include "Face.h"
 #include <math.h>
+#include <string.h>
 
 namespace {
 
@@ -31,8 +32,64 @@ const char* expressionName(Expression e) {
         case Expression::Confused:  return "confused";
         case Expression::Listening: return "listening";
         case Expression::Love:      return "love";
+        case Expression::Laughing:  return "laughing";
+        case Expression::Crying:    return "crying";
+        case Expression::Embarrassed: return "embarrassed";
+        case Expression::Shocked:   return "shocked";
+        case Expression::Thinking:  return "thinking";
+        case Expression::Winking:   return "winking";
+        case Expression::Cool:      return "cool";
+        case Expression::Relaxed:   return "relaxed";
+        case Expression::Silly:     return "silly";
         default:                    return "?";
     }
+}
+
+namespace {
+struct EmotionMap {
+    const char* name;
+    Expression expr;
+};
+// xiaozhi-esp32's emotion vocabulary (the "emotion" field of its "llm"
+// messages), mapped to our closest expression.
+const EmotionMap kEmotionMap[] = {
+    {"neutral", Expression::Neutral},       {"happy", Expression::Happy},
+    {"laughing", Expression::Laughing},     {"funny", Expression::Laughing},
+    {"sad", Expression::Sad},               {"angry", Expression::Angry},
+    {"crying", Expression::Crying},         {"loving", Expression::Love},
+    {"embarrassed", Expression::Embarrassed}, {"surprised", Expression::Surprised},
+    {"shocked", Expression::Shocked},       {"thinking", Expression::Thinking},
+    {"winking", Expression::Winking},       {"cool", Expression::Cool},
+    {"relaxed", Expression::Relaxed},       {"delicious", Expression::Silly},
+    {"kissy", Expression::Love},            {"confident", Expression::Cool},
+    {"sleepy", Expression::Sleepy},         {"silly", Expression::Silly},
+    {"confused", Expression::Confused},
+};
+}  // namespace
+
+const char* const kEmotionNames[] = {
+    "neutral", "happy", "laughing", "funny", "sad", "angry", "crying",
+    "loving", "embarrassed", "surprised", "shocked", "thinking", "winking",
+    "cool", "relaxed", "delicious", "kissy", "confident", "sleepy", "silly", "confused",
+};
+const int kEmotionNameCount = sizeof(kEmotionNames) / sizeof(kEmotionNames[0]);
+
+bool expressionForEmotion(const char* emotion, Expression& out) {
+    if (!emotion) return false;
+    for (const auto& m : kEmotionMap) {
+        if (strcmp(m.name, emotion) == 0) {
+            out = m.expr;
+            return true;
+        }
+    }
+    // Our own expression names work too ("listening", "love").
+    for (int i = 0; i < (int)Expression::Count; ++i) {
+        if (strcmp(expressionName((Expression)i), emotion) == 0) {
+            out = (Expression)i;
+            return true;
+        }
+    }
+    return false;
 }
 
 FaceParams paramsFor(Expression e) {
@@ -46,6 +103,9 @@ FaceParams paramsFor(Expression e) {
     p.blush = 0;
     p.eyeR = 40; p.eyeG = 220; p.eyeB = 255;
     p.lookY = 0;
+    p.lookX = 0;
+    p.opennessL = 1; p.opennessR = 1;
+    p.lidTop = 0; p.tears = 0; p.tongue = 0; p.mouthSkew = 0; p.bounce = 0;
 
     switch (e) {
         case Expression::Neutral:
@@ -102,6 +162,73 @@ FaceParams paramsFor(Expression e) {
             p.mouthW = 56; p.mouthCurve = 1.0f; p.mouthOpen = 0.25f;
             p.blush = 1.0f;
             p.eyeR = 255; p.eyeG = 90; p.eyeB = 170;
+            break;
+        case Expression::Laughing:   // squeezed-shut happy eyes, big open grin, bouncing
+            p.eyeW = 72; p.eyeH = 76;
+            p.lidBottom = 0.8f;
+            p.mouthW = 76; p.mouthCurve = 1.0f; p.mouthOpen = 0.85f;
+            p.blush = 0.8f;
+            p.eyeR = 90; p.eyeG = 240; p.eyeB = 255;
+            p.bounce = 1.0f;
+            break;
+        case Expression::Crying:     // sad eyes with tears running down
+            p.eyeW = 60; p.eyeH = 70;
+            p.lidSad = 0.65f;
+            p.mouthW = 50; p.mouthCurve = -1.0f; p.mouthOpen = 0.3f;
+            p.eyeR = 70; p.eyeG = 120; p.eyeB = 255;
+            p.lookY = 0.4f;
+            p.tears = 1.0f;
+            break;
+        case Expression::Embarrassed: // shy glance down and away, deep blush
+            p.eyeW = 62; p.eyeH = 72;
+            p.lidBottom = 0.3f;
+            p.mouthW = 36; p.mouthCurve = 0.5f; p.mouthSkew = 0.4f;
+            p.blush = 1.0f;
+            p.eyeR = 255; p.eyeG = 150; p.eyeB = 190;
+            p.lookY = 0.55f; p.lookX = -0.45f;
+            break;
+        case Expression::Shocked:    // even bigger than surprised, pale, tall "O"
+            p.eyeW = 80; p.eyeH = 104;
+            p.mouthW = 34; p.mouthCurve = 0; p.mouthOpen = 1.0f;
+            p.eyeR = 200; p.eyeG = 245; p.eyeB = 255;
+            p.lookY = -0.25f;
+            break;
+        case Expression::Thinking:   // looking up and to the side, mouth pushed over
+            p.eyeW = 64; p.eyeH = 80;
+            p.eyeScaleL = 0.92f;
+            p.lidTop = 0.15f;
+            p.mouthW = 30; p.mouthCurve = -0.1f; p.mouthSkew = 0.8f;
+            p.eyeR = 120; p.eyeG = 200; p.eyeB = 255;
+            p.lookY = -0.7f; p.lookX = 0.55f;
+            break;
+        case Expression::Winking:    // right eye shut, smirky smile
+            p.eyeW = 68; p.eyeH = 84;
+            p.opennessR = 0.0f;
+            p.mouthW = 54; p.mouthCurve = 0.9f; p.mouthSkew = -0.5f;
+            p.blush = 0.4f;
+            p.eyeR = 60; p.eyeG = 235; p.eyeB = 255;
+            break;
+        case Expression::Cool:       // heavy flat lids, confident smirk
+            p.eyeW = 74; p.eyeH = 70;
+            p.lidTop = 0.55f;
+            p.mouthW = 46; p.mouthCurve = 0.5f; p.mouthSkew = 0.7f;
+            p.eyeR = 150; p.eyeG = 120; p.eyeB = 255;
+            break;
+        case Expression::Relaxed:    // content, half-closed eyes, soft smile
+            p.eyeW = 70; p.eyeH = 78;
+            p.lidTop = 0.4f; p.lidBottom = 0.25f;
+            p.mouthW = 50; p.mouthCurve = 0.6f;
+            p.blush = 0.3f;
+            p.eyeR = 80; p.eyeG = 230; p.eyeB = 210;
+            p.lookY = -0.1f;
+            break;
+        case Expression::Silly:      // lopsided eyes, tongue out
+            p.eyeW = 66; p.eyeH = 84;
+            p.eyeScaleL = 1.15f; p.eyeScaleR = 0.78f;
+            p.mouthW = 60; p.mouthCurve = 0.9f; p.mouthSkew = -0.3f;
+            p.tongue = 1.0f;
+            p.eyeR = 120; p.eyeG = 255; p.eyeB = 160;
+            p.lookX = -0.2f;
             break;
         default:
             break;
@@ -206,10 +333,11 @@ void Face::draw(Canvas& cv) const {
     // Blink: openness dips to 0 and back over kBlinkMs.
     float blink = 1.0f;
     if (blinkPhase_ >= 0) blink = fabsf(blinkPhase_ - kBlinkMs / 2) / (kBlinkMs / 2);
-    const float open = clampf(p.openness * blink, 0, 1);
+    const float openBoth = clampf(p.openness * blink, 0, 1);
 
-    const float breath = sinf(timeMs_ * 2 * kPi / kBreathMs) * 2.5f * s;
-    const float gx = lookX_ * 24 * s;
+    const float breath = sinf(timeMs_ * 2 * kPi / kBreathMs) * 2.5f * s
+                       + fabsf(sinf(timeMs_ * 2 * kPi / 360.0f)) * -5.0f * s * clampf(p.bounce, 0, 1);
+    const float gx = clampf(lookX_ + p.lookX, -1, 1) * 24 * s;
     const float gy = clampf(lookY_ + p.lookY, -1, 1) * 16 * s;
 
     cv.fillScreen(bg);
@@ -222,6 +350,7 @@ void Face::draw(Canvas& cv) const {
         // Perspective: the eye on the side we're looking toward grows a bit.
         float persp = 1.0f + lookX_ * 0.08f * side;
         float sc = (side < 0 ? p.eyeScaleL : p.eyeScaleR) * persp;
+        float open = clampf(openBoth * (side < 0 ? p.opennessL : p.opennessR), 0, 1);
         float w = p.eyeW * s * sc;
         float hFull = p.eyeH * s * sc;
         float h = fmaxf(hFull * open, 5 * s);
@@ -233,7 +362,7 @@ void Face::draw(Canvas& cv) const {
         cv.fillRoundRect((int)left, (int)top, (int)w, (int)h, r, eyeCol);
 
         // Sparkle highlight, only when the eye is open enough to hold it.
-        if (open > 0.55f && p.lidBottom < 0.45f) {
+        if (open > 0.55f && p.lidBottom < 0.45f && p.lidTop < 0.2f) {
             float hr = w * 0.1f;
             cv.fillCircle((int)(x - w * 0.2f), (int)(top + h * 0.24f), (int)hr, shine);
             cv.fillCircle((int)(x - w * 0.02f), (int)(top + h * 0.38f), (int)(hr * 0.45f), shine);
@@ -251,6 +380,10 @@ void Face::draw(Canvas& cv) const {
             cv.fillTriangle((int)innerX, (int)top - 3, (int)outerX, (int)top - 3,
                             (int)outerX, (int)(top + p.lidSad * h * 0.6f), bg);
         }
+        if (p.lidTop > 0.01f) {
+            // Flat, heavy upper lid.
+            cv.fillRect((int)(left - 3), (int)(top - 3), (int)(w + 6), (int)(3 + p.lidTop * h * 0.55f), bg);
+        }
         if (p.lidBottom > 0.01f) {
             // A background-colored ellipse rising from below carves the eye
             // into an arch; the corners survive as the arch's "legs".
@@ -258,6 +391,20 @@ void Face::draw(Canvas& cv) const {
             float bottom = top + h;
             float cyLid = bottom + ry - p.lidBottom * h * 1.05f;
             cv.fillEllipse((int)x, (int)cyLid, (int)(w * 0.6f), (int)ry, bg);
+        }
+
+        if (p.tears > 0.05f) {
+            // Two drops per eye sliding down from the outer corner, looping.
+            const float t = clampf(p.tears, 0, 1);
+            const uint16_t tc = rgb565((int)(90 * t), (int)(170 * t), (int)(255 * t));
+            for (int d = 0; d < 2; ++d) {
+                float phase = fmodf(timeMs_ / 1100.0f + d * 0.5f + (side > 0 ? 0.25f : 0), 1.0f);
+                float tx = x + side * w * 0.32f;
+                float ty = top + h + 4 * s + phase * 46 * s;
+                float r = 4.5f * s;
+                cv.fillCircle((int)tx, (int)ty, (int)r, tc);
+                cv.fillTriangle((int)(tx - r), (int)ty, (int)(tx + r), (int)ty, (int)tx, (int)(ty - 2.4f * r), tc);
+            }
         }
 
         if (p.blush > 0.02f) {
@@ -269,7 +416,7 @@ void Face::draw(Canvas& cv) const {
     }
 
     // Mouth: a thick parabola, plus an open "hole" when talking/surprised.
-    const float mx = cx + gx * 0.5f;
+    const float mx = cx + gx * 0.5f + p.mouthSkew * p.mouthW * 0.18f * s;
     const float my = H * 0.78f + breath * 0.6f + gy * 0.35f;
     const float mw = p.mouthW * s;
     const float k = p.mouthCurve * 13 * s;    // depth of the curve
@@ -282,7 +429,7 @@ void Face::draw(Canvas& cv) const {
         for (int i = 0; i <= N; ++i) {
             float u = (float)i / N * 2 - 1;  // -1..1 across the mouth
             float px = mx + u * mw / 2;
-            float py = my - k * 0.5f + k * (1 - u * u);
+            float py = my - k * 0.5f + k * (1 - u * u) - p.mouthSkew * u * 7 * s;  // skew lifts one corner
             cv.fillCircle((int)px, (int)py, (int)thick, eyeCol);
         }
     } else if (k > 3 * s) {
@@ -297,5 +444,15 @@ void Face::draw(Canvas& cv) const {
         float rx = fmaxf(mw * 0.42f, 9 * s) * (0.75f + 0.25f * mOpen);
         float ry = 3 * s + mOpen * 18 * s;
         cv.fillEllipse((int)mx, (int)my, (int)rx, (int)ry, eyeCol);
+    }
+
+    if (p.tongue > 0.05f) {
+        // Tongue poking out below the middle of the mouth.
+        const float t = clampf(p.tongue, 0, 1);
+        const float tx = mx + mw * 0.12f;
+        const float ty = (mOpen > 0.04f && k > 3 * s) ? my - k * 0.4f + (4 + mOpen * 26) * s * 0.9f
+                                                      : my + k * 0.5f + 6 * s;
+        cv.fillEllipse((int)tx, (int)ty, (int)(mw * 0.17f * t), (int)(11 * s * t),
+                       rgb565((int)(255 * t), (int)(95 * t), (int)(140 * t)));
     }
 }

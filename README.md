@@ -25,6 +25,8 @@ about 6 seconds to say one of these:
 | tell me a joke / make me laugh | Laughs |
 | look left / look right | Looks that way |
 | be happy / be sad / be angry / be surprised | Shows that expression |
+| be cool / be silly (or "make a silly face") | Heavy-lidded smirk / lopsided eyes with its tongue out |
+| wink at me / give me a wink | Winks |
 | good night / go to sleep | Yawns, then sleeps and dims until "Hey Buddy", a tap, or a shake |
 | wake up | Startled awake |
 | be quiet / quiet please | Turns its sounds off (remembered after a restart) |
@@ -43,6 +45,20 @@ separation uses the two channels to pull your voice apart from other sounds,
 like a TV, fan or music, and the wake word detector checks both. To compare
 against a single mic, set `kUseBothMics = false` in `main/voice.cpp`. The serial
 log prints the active audio chain at boot, such as `|SE(BSS)| -> |VAD| -> |WakeNet|`.
+
+## Expressions and emotions
+
+The face has 18 expressions (above). Each is a set of numbers, such as eye size,
+lid angles, mouth curve, tears, tongue and color, so any two blend smoothly into
+each other.
+
+It also understands the **21 emotion names** that AI voice servers like
+[xiaozhi-esp32](https://github.com/78/xiaozhi-esp32)'s attach to their replies:
+neutral, happy, laughing, funny, sad, angry, crying, loving, embarrassed, surprised,
+shocked, thinking, winking, cool, relaxed, delicious, kissy, confident, sleepy,
+silly and confused. `Companion::onEmotion("laughing")` shows the closest expression
+with a matching sound. That's the hook a future "talk with AI" feature will use.
+The mapping is `kEmotionMap` in `components/face/Face.cpp`.
 
 ## Sound effects
 

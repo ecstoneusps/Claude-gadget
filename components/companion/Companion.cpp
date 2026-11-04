@@ -29,6 +29,11 @@ const CommandPhrase kCommandPhrases[] = {
     {VoiceCommand::BeQuiet, "quiet please"},
     {VoiceCommand::SoundOn, "sound on"},
     {VoiceCommand::SoundOn, "you can talk"},
+    {VoiceCommand::Wink, "wink at me"},
+    {VoiceCommand::Wink, "give me a wink"},
+    {VoiceCommand::BeCool, "be cool"},
+    {VoiceCommand::BeSilly, "be silly"},
+    {VoiceCommand::BeSilly, "make a silly face"},
 };
 const int kCommandPhraseCount = sizeof(kCommandPhrases) / sizeof(kCommandPhrases[0]);
 
@@ -51,6 +56,9 @@ const char* commandName(VoiceCommand c) {
         case VoiceCommand::BeSurprised: return "be surprised";
         case VoiceCommand::BeQuiet:     return "be quiet";
         case VoiceCommand::SoundOn:     return "sound on";
+        case VoiceCommand::Wink:        return "wink";
+        case VoiceCommand::BeCool:      return "be cool";
+        case VoiceCommand::BeSilly:     return "be silly";
         default:                        return "none";
     }
 }
@@ -267,8 +275,49 @@ void Companion::onCommand(VoiceCommand cmd, uint32_t now) {
             muted_ = true; react(Expression::Sad, 1500, now); break;
         case VoiceCommand::SoundOn:
             muted_ = false; react(Expression::Happy, 2000, now); play(Sfx::Chirp, now); break;
+        case VoiceCommand::Wink:
+            react(Expression::Winking, 1500, now); play(Sfx::Chirp, now); break;
+        case VoiceCommand::BeCool:
+            react(Expression::Cool, 4000, now); play(Sfx::Boop, now); break;
+        case VoiceCommand::BeSilly:
+            react(Expression::Silly, 4000, now); play(Sfx::Giggle, now); break;
         default: break;
     }
+}
+
+namespace {
+// The sound that goes with each expression when shown on request.
+Sfx soundFor(Expression e) {
+    switch (e) {
+        case Expression::Happy:       return Sfx::Happy;
+        case Expression::Laughing:    return Sfx::Giggle;
+        case Expression::Silly:       return Sfx::Giggle;
+        case Expression::Love:        return Sfx::Love;
+        case Expression::Embarrassed: return Sfx::Love;
+        case Expression::Sad:         return Sfx::Sad;
+        case Expression::Crying:      return Sfx::Sad;
+        case Expression::Angry:       return Sfx::Angry;
+        case Expression::Surprised:   return Sfx::Surprised;
+        case Expression::Shocked:     return Sfx::Surprised;
+        case Expression::Confused:    return Sfx::Confused;
+        case Expression::Thinking:    return Sfx::Confused;
+        case Expression::Winking:     return Sfx::Chirp;
+        case Expression::Cool:        return Sfx::Boop;
+        case Expression::Sleepy:      return Sfx::Yawn;
+        default:                      return Sfx::None;  // neutral, relaxed, listening
+    }
+}
+}  // namespace
+
+bool Companion::onEmotion(const char* emotion, uint32_t now, uint32_t ms) {
+    Expression e;
+    if (!expressionForEmotion(emotion, e)) return false;
+    interact(now, true);
+    reactionUntil_ = now;
+    react(e, ms, now);
+    play(soundFor(e), now);
+    if (e == Expression::Laughing) laughUntil_ = now + (ms < 2500 ? ms : 2500);
+    return true;
 }
 
 void Companion::onCommandTimeout(uint32_t now) {

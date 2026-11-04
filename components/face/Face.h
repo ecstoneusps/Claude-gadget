@@ -16,10 +16,26 @@ enum class Expression : uint8_t {
     Confused,
     Listening,
     Love,
+    Laughing,
+    Crying,
+    Embarrassed,
+    Shocked,
+    Thinking,
+    Winking,
+    Cool,
+    Relaxed,
+    Silly,
     Count
 };
 
 const char* expressionName(Expression e);
+
+// The emotion names AI voice servers send (xiaozhi-esp32's set: "happy",
+// "laughing", "crying", "thinking", "winking", ...). Each maps to the closest
+// expression. Returns false for names it doesn't know.
+bool expressionForEmotion(const char* emotion, Expression& out);
+extern const char* const kEmotionNames[];
+extern const int kEmotionNameCount;
 
 // Every value here is tweened, so any two expressions blend smoothly.
 struct FaceParams {
@@ -35,6 +51,13 @@ struct FaceParams {
     float blush;             // 0..1 cheek glow
     float eyeR, eyeG, eyeB;  // eye/mouth color, 0..255
     float lookY;             // vertical gaze bias (-1 up .. +1 down)
+    float lookX;             // horizontal gaze bias (-1 left .. +1 right)
+    float opennessL, opennessR; // per-eye openness multiplier (winking = one closed)
+    float lidTop;            // 0..1 flat top lid (cool, relaxed: heavy-lidded)
+    float tears;             // 0..1 falling tears
+    float tongue;            // 0..1 tongue sticking out (silly)
+    float mouthSkew;         // -1..1 crooked mouth / smirk
+    float bounce;            // 0..1 bouncing with laughter
 };
 
 FaceParams paramsFor(Expression e);

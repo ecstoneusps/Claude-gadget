@@ -23,7 +23,7 @@ command_confidence           = 0      # 0-1; raise to 0.3 or so if it reacts to 
 #  say.hello  say.good_night  say.wake_up  say.how_are_you  say.i_love_you
 #  say.good_job  say.scold  say.thank_you  say.tell_joke  say.look_left
 #  say.look_right  say.be_happy  say.be_sad  say.be_angry  say.be_surprised
-#  say.be_quiet  say.sound_on
+#  say.be_quiet  say.sound_on  say.wink  say.be_cool  say.be_silly
 # say.hello = howdy, whats up buddy
 # say.good_night = nighty night
 
