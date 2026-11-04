@@ -37,6 +37,20 @@ jobs:
           echo "- App: $(stat -c %s build/desk_companion.bin) bytes (partition: 4 MB)" >> "$GITHUB_STEP_SUMMARY"
           echo "- Speech models: $(stat -c %s build/srmodels/srmodels.bin) bytes (partition: 8 MB)" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Show resolved library versions
+        run: |
+          echo "----- BEGIN dependencies.lock -----"
+          cat dependencies.lock
+          echo "----- END dependencies.lock -----"
+          {
+            echo "<details><summary>Library versions (dependencies.lock)</summary>"
+            echo
+            echo '```yaml'
+            cat dependencies.lock
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # Everything needed to flash without building:
       #   cd <unzipped folder>/build && python -m esptool --chip esp32s3 write_flash @flash_args
       - name: Upload firmware
