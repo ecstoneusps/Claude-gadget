@@ -4,6 +4,6 @@ set -e
 cd "$(dirname "$0")/.."
 OUT="${TMPDIR:-/tmp}/companion_test"
 g++ -std=c++17 -Wall -Wextra -Werror -Icomponents/face -Icomponents/companion -Icomponents/sfx \
-    tests/companion_test.cpp components/companion/Companion.cpp components/face/Face.cpp \
+    tests/companion_test.cpp components/companion/Companion.cpp components/companion/Presence.cpp components/face/Face.cpp \
     components/sfx/Sfx.cpp -o "$OUT"
 "$OUT"

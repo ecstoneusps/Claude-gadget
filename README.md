@@ -71,6 +71,8 @@ hear itself. Volume is `kVolume` in `main/sound.cpp`.
 
 | You do | It does |
 |---|---|
+| Sit down in front of it (or wave near the top of the screen) | Wakes up, looks up at you and says hello |
+| Walk away | Dozes off after about 20 seconds instead of a minute |
 | Tap the screen | Happy |
 | Hold a finger on it ("petting") | Love eyes and blush |
 | Shake it | Confused / dizzy |
@@ -90,6 +92,7 @@ components/sfx/        Sound effect synthesizer (portable C++)
 main/main.cpp          CoreS3 glue: display, touch, IMU, battery, main loop
 main/voice.cpp         ESP-SR pipeline: mic -> audio front-end -> wake word -> commands
 main/sound.cpp         Plays sound effects, switching the audio hardware mic <-> speaker
+main/proximity.cpp     LTR-553 proximity sensor driver (presence logic is in components/companion/Presence.*)
 tests/                 Native unit tests for the brain (run on a PC)
 tools/preview/         Renders the face to PNG/GIF on a PC
 partitions.csv         Flash layout (4 MB app + 8 MB speech models; ~1.8 MB and ~3.1 MB used)
@@ -157,6 +160,11 @@ python3 tools/preview/make_preview.py   # face images + sound WAVs (needs g++ an
 - **Different wake word:** run `idf.py menuconfig` → *ESP Speech Recognition* →
   *Load Multiple Wake Words*. Choose one, such as "Hi M Five", "Jarvis" or "Computer",
   and turn off "Hey Buddy".
+- **Doesn't notice you sitting down:** the proximity sensor (just above the screen)
+  is infrared and short-range, roughly a hand's length to an arm's length depending on
+  what you're wearing. The serial log prints `prox <reading>, baseline <empty desk>`
+  every 10 seconds. Compare the numbers with you seated and away, then lower `minRise`
+  / `riseFraction` in `components/companion/Presence.h`, or angle the buddy toward you.
 - **Tilt goes the wrong way:** flip the signs of `tx` / `ty` in `handleImu()` in `main/main.cpp`.
 
 ## Roadmap
@@ -167,6 +175,7 @@ python3 tools/preview/make_preview.py   # face images + sound WAVs (needs g++ an
 4. Test on hardware and tune thresholds
 5. ~~Use both microphones for better pickup across a room~~
 6. ~~Sound effects through the speaker (chirps, giggles, yawns)~~
-7. Proximity sensor and camera: wake up when someone sits down
-8. Remember the mute setting across restarts
-9. Cloud conversation: speech-to-text → LLM → emotion tag drives the face, with spoken replies
+7. ~~Proximity sensor: wake up when someone sits down~~
+8. Camera: recognize that it's you, look toward your face
+9. Remember the mute setting across restarts
+10. Cloud conversation: speech-to-text → LLM → emotion tag drives the face, with spoken replies

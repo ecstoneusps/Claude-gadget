@@ -52,6 +52,10 @@ public:
     void onTilt(float x, float y, uint32_t now);  // -1..1 each
     void onTiltEnd();
 
+    // Proximity sensor: someone sat down in front of it / went away.
+    void onArrived(uint32_t now);
+    void onLeft(uint32_t now);
+
     // Audio: called for every processed audio frame.
     void onAudio(float levelDb, bool speech, uint32_t now);
 
@@ -84,6 +88,7 @@ public:
     float clapJumpDb = 22.0f;     // sudden rise between frames that counts as a clap
     float clapMinDb = -30.0f;     // ...and it must be at least this loud
     uint32_t speechEndMs = 1200;  // quiet this long = they stopped talking
+    uint32_t sleepAfterLeftMs = 20000;  // doze off sooner once you walk away
 
 private:
     void react(Expression e, uint32_t ms, uint32_t now);
@@ -124,4 +129,6 @@ private:
     uint32_t lastPurr_ = 0, lastShakeSound_ = 0;
     bool petting_ = false, shaking_ = false;
     bool idleSleepy_ = false;   // already yawned for this idle stretch
+    uint32_t lastGreeting_ = 0;
+    bool greeted_ = false;
 };

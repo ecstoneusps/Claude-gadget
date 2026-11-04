@@ -132,6 +132,29 @@ void Companion::onTilt(float x, float y, uint32_t now) {
 
 void Companion::onTiltEnd() { tilted_ = false; }
 
+void Companion::onArrived(uint32_t now) {
+    if (awaiting_) return;  // mid-conversation; don't interrupt
+    interact(now, true);    // wakes it, even from "good night"
+    // Greet -- but not every time a hand waves past the sensor.
+    if (!greeted_ || now - lastGreeting_ > 15000) {
+        reactionUntil_ = now;
+        react(Expression::Happy, 2500, now);
+        look(0, -0.3f, 1500, now);  // look up at you
+        play(Sfx::Happy, now);
+        lastGreeting_ = now;
+        greeted_ = true;
+    }
+}
+
+void Companion::onLeft(uint32_t now) {
+    if (asleep_) return;
+    // Pretend the last interaction was long ago so it dozes off
+    // sleepAfterLeftMs from now (unless it was going to sleep sooner anyway).
+    const uint32_t idle = now - lastInteraction_;
+    if (sleepAfterMs > sleepAfterLeftMs && idle < sleepAfterMs - sleepAfterLeftMs)
+        lastInteraction_ = now - (sleepAfterMs - sleepAfterLeftMs);
+}
+
 void Companion::onAudio(float db, bool speech, uint32_t now) {
     const float jump = db - prevDb_;
     prevDb_ = db;

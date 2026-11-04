@@ -5,6 +5,7 @@
 //   components/companion  decides how to react to events (portable, unit-tested)
 //   main/voice.cpp        offline speech: "Hey Buddy" wake word + commands
 //   main/sound.cpp        sound effects through the speaker
+//   main/proximity.cpp    proximity sensor: notices you sitting down
 //   this file             hardware glue: display, touch, IMU, battery, main loop
 
 #include <math.h>
@@ -20,6 +21,8 @@
 
 #include "Companion.h"
 #include "Face.h"
+#include "Presence.h"
+#include "proximity.h"
 #include "sound.h"
 #include "voice.h"
 
@@ -99,6 +102,35 @@ static void handleImu(uint32_t now) {
     }
 }
 
+// Proximity: greet you when you sit down, doze sooner when you leave.
+// Logs the raw reading every 10 s so the thresholds can be tuned.
+static void handleProximity(uint32_t now, bool sensorOk) {
+    static PresenceDetector presence;
+    static uint32_t lastRead = 0, lastLog = 0;
+    if (!sensorOk || now - lastRead < 50) return;
+    lastRead = now;
+
+    uint16_t raw;
+    if (!proximityRead(&raw)) return;
+    switch (presence.update(raw, now)) {
+        case PresenceDetector::Event::Arrived:
+            ESP_LOGI(TAG, "someone's here (prox %u, baseline %.0f)", raw, presence.baseline());
+            buddy.onArrived(now);
+            break;
+        case PresenceDetector::Event::Left:
+            ESP_LOGI(TAG, "they left (prox %u, baseline %.0f)", raw, presence.baseline());
+            buddy.onLeft(now);
+            break;
+        default:
+            break;
+    }
+    if (now - lastLog > 10000) {
+        lastLog = now;
+        ESP_LOGI(TAG, "prox %u, baseline %.0f, %s", raw, presence.baseline(),
+                 presence.present() ? "present" : "away");
+    }
+}
+
 static void handleVoice(uint32_t now) {
     if (!voiceOk.load()) return;
     buddy.onAudio(voiceLevelDb(), voiceSpeech(), now);
@@ -133,6 +165,7 @@ static void voiceInitTask(void*) {
 }
 
 static void uiTask(void*) {
+    const bool proxOk = proximityBegin();
     uint32_t lastFrame = nowMs(), lastBattery = 0, lastImu = 0;
     bool dimmed = false;
     while (true) {
@@ -144,6 +177,7 @@ static void uiTask(void*) {
             handleImu(now);
         }
         handleVoice(now);
+        handleProximity(now, proxOk);
 
         if (lastBattery == 0 || now - lastBattery > 10000) {
             lastBattery = now;

@@ -6,6 +6,7 @@
 #include "Companion.h"
 #include "Face.h"
 #include "Sfx.h"
+#include "Presence.h"
 
 static int failures = 0;
 #define CHECK(cond)                                                     \
@@ -263,6 +264,99 @@ static void test_sfx_render_matches_length() {
     }
 }
 
+// Feeds `ms` worth of 50 ms readings at `raw` (+/- a little noise).
+static PresenceDetector::Event feed(PresenceDetector& p, uint32_t& now, uint16_t raw, uint32_t ms,
+                                    int* arrivals = nullptr, int* lefts = nullptr) {
+    PresenceDetector::Event last = PresenceDetector::Event::None;
+    for (uint32_t t = 0; t < ms; t += 50) {
+        now += 50;
+        uint16_t v = raw + ((now / 50) % 3) - 1;  // tiny jitter
+        auto e = p.update(v, now);
+        if (e == PresenceDetector::Event::Arrived && arrivals) ++*arrivals;
+        if (e == PresenceDetector::Event::Left && lefts) ++*lefts;
+        if (e != PresenceDetector::Event::None) last = e;
+    }
+    return last;
+}
+
+static void test_presence_arrive_and_leave() {
+    PresenceDetector p;
+    uint32_t now = 0;
+    int arrivals = 0, lefts = 0;
+    feed(p, now, 40, 5000, &arrivals, &lefts);      // empty desk
+    CHECK(!p.present() && arrivals == 0);
+    feed(p, now, 140, 1000, &arrivals, &lefts);     // someone sits down
+    CHECK(p.present() && arrivals == 1);
+    feed(p, now, 140, 60000, &arrivals, &lefts);    // stays a minute
+    CHECK(p.present() && arrivals == 1 && lefts == 0);
+    feed(p, now, 40, 4000, &arrivals, &lefts);      // walks away
+    CHECK(!p.present() && lefts == 1);
+}
+
+static void test_presence_ignores_blips_and_drift() {
+    PresenceDetector p;
+    uint32_t now = 0;
+    int arrivals = 0;
+    feed(p, now, 40, 3000, &arrivals);
+    feed(p, now, 200, 150, &arrivals);   // something flicks past
+    feed(p, now, 40, 3000, &arrivals);
+    CHECK(arrivals == 0);
+    for (int level = 40; level <= 70; level += 2)  // slow ambient drift
+        feed(p, now, level, 5000, &arrivals);
+    CHECK(arrivals == 0);
+    CHECK(p.baseline() > 60);
+}
+
+static void test_presence_recovers_from_object_left_nearby() {
+    PresenceDetector p;
+    uint32_t now = 0;
+    int arrivals = 0, lefts = 0;
+    feed(p, now, 40, 3000, &arrivals, &lefts);
+    feed(p, now, 300, 1000, &arrivals, &lefts);           // a mug parked next to it
+    CHECK(p.present());
+    feed(p, now, 300, 20 * 60000, &arrivals, &lefts);     // 20 minutes later
+    CHECK(!p.present() && lefts == 1);                     // accepted as the new "empty"
+    feed(p, now, 40, 3000, &arrivals, &lefts);            // mug removed
+    CHECK(p.baseline() < 60);                             // follows back down quickly
+}
+
+static void test_sitting_down_wakes_and_greets() {
+    Rig r;
+    r.run(70000);                       // dozed off
+    CHECK(r.expr() == Expression::Sleepy);
+    r.c.takeSound();
+    r.c.onArrived(r.now);
+    r.run(100);
+    CHECK(r.expr() == Expression::Happy);
+    CHECK(r.c.takeSound() == Sfx::Happy);
+    r.c.onLeft(r.now);
+    r.c.onArrived(r.now);               // hand wave right after: no second greeting
+    CHECK(r.c.takeSound() == Sfx::None);
+}
+
+static void test_good_night_then_sit_down_wakes() {
+    Rig r;
+    r.c.onWakeWord(r.now);
+    r.c.onCommand(VoiceCommand::GoodNight, r.now);
+    r.run(100);
+    CHECK(r.c.isAsleep());
+    r.c.onArrived(r.now);
+    r.run(100);
+    CHECK(!r.c.isAsleep());
+    CHECK(r.expr() == Expression::Happy);
+}
+
+static void test_walking_away_dozes_sooner() {
+    Rig r;
+    r.c.onTap(r.now);
+    r.run(3000);
+    r.c.onLeft(r.now);
+    r.run(15000);
+    CHECK(r.expr() != Expression::Sleepy);  // not yet
+    r.run(6000);
+    CHECK(r.expr() == Expression::Sleepy);  // ~20 s after leaving, not 60
+}
+
 int main() {
     struct { const char* name; void (*fn)(); } tests[] = {
         {"tap makes happy then neutral", test_tap_makes_happy_then_neutral},
@@ -282,6 +376,12 @@ int main() {
         {"yawns once when dozing off", test_yawns_once_when_dozing_off},
         {"mouth sings along", test_mouth_sings_along},
         {"sfx render matches length", test_sfx_render_matches_length},
+        {"presence arrive and leave", test_presence_arrive_and_leave},
+        {"presence ignores blips and drift", test_presence_ignores_blips_and_drift},
+        {"presence recovers from object left nearby", test_presence_recovers_from_object_left_nearby},
+        {"sitting down wakes and greets", test_sitting_down_wakes_and_greets},
+        {"good night then sit down wakes", test_good_night_then_sit_down_wakes},
+        {"walking away dozes sooner", test_walking_away_dozes_sooner},
     };
     for (auto& t : tests) {
         int before = failures;
