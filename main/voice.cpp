@@ -33,6 +33,13 @@ static QueueHandle_t s_events = nullptr;
 static std::atomic<float> s_levelDb{-90.0f};
 static std::atomic<bool> s_speech{false};
 
+// Pause handshake with the sound player (the mic and speaker can't run together).
+static std::atomic<bool> s_feeding{false}, s_pauseReq{false}, s_paused{false};
+
+void voicePause() { s_pauseReq.store(true); }
+void voiceResume() { s_pauseReq.store(false); }
+bool voicePaused() { return !s_feeding.load() || s_paused.load(); }
+
 float voiceLevelDb() { return s_levelDb.load(); }
 bool voiceSpeech() { return s_speech.load(); }
 
@@ -52,7 +59,17 @@ static void feedTask(void*) {
     ESP_LOGI(TAG, "feed: %d samples x %d ch per chunk", chunk, channels);
 
     int idx = 0, primed = 0;
+    s_feeding.store(true);
     while (true) {
+        if (s_pauseReq.load()) {
+            // Let queued recordings finish, then park until the sound is done.
+            while (M5.Mic.isRecording()) vTaskDelay(1);
+            s_paused.store(true);
+            while (s_pauseReq.load()) vTaskDelay(pdMS_TO_TICKS(5));
+            s_paused.store(false);
+            primed = 0;  // old buffers are stale
+            continue;
+        }
         while (M5.Mic.isRecording() >= 2) vTaskDelay(1);
         M5.Mic.record(bufs[idx], chunk * channels, kSampleRate);
         const int done = (idx + 1) % 3;  // queued two calls ago

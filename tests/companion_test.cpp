@@ -5,6 +5,7 @@
 
 #include "Companion.h"
 #include "Face.h"
+#include "Sfx.h"
 
 static int failures = 0;
 #define CHECK(cond)                                                     \
@@ -180,6 +181,88 @@ static void test_phrases_are_valid_for_recognizer() {
     }
 }
 
+static void test_sounds_follow_events() {
+    Rig r;
+    r.c.onTap(r.now);
+    CHECK(r.c.takeSound() == Sfx::Boop);
+    CHECK(r.c.takeSound() == Sfx::None);  // played once
+    r.c.onWakeWord(r.now);
+    CHECK(r.c.takeSound() == Sfx::Chirp);
+    r.c.onCommand(VoiceCommand::TellJoke, r.now);
+    CHECK(r.c.takeSound() == Sfx::Giggle);
+    r.c.onWakeWord(r.now);
+    r.c.onCommandTimeout(r.now);
+    CHECK(r.c.takeSound() == Sfx::Confused);
+    r.c.onWakeWord(r.now);
+    r.c.onCommand(VoiceCommand::GoodNight, r.now);
+    CHECK(r.c.takeSound() == Sfx::Yawn);
+    r.c.onTap(r.now);  // startled awake
+    CHECK(r.c.takeSound() == Sfx::Wake);
+}
+
+static void test_be_quiet_mutes_until_sound_on() {
+    Rig r;
+    r.c.onWakeWord(r.now);
+    r.c.takeSound();
+    r.c.onCommand(VoiceCommand::BeQuiet, r.now);
+    CHECK(r.c.isMuted());
+    CHECK(r.c.takeSound() == Sfx::None);
+    r.c.onTap(r.now);
+    r.c.onWakeWord(r.now);
+    CHECK(r.c.takeSound() == Sfx::None);
+    r.c.onCommand(VoiceCommand::SoundOn, r.now);
+    CHECK(!r.c.isMuted());
+    CHECK(r.c.takeSound() == Sfx::Chirp);
+}
+
+static void test_petting_purrs_without_spamming() {
+    Rig r;
+    int purrs = 0;
+    for (int i = 0; i < 120; ++i) {  // ~4 s of holding, one event per frame
+        r.c.onHold(r.now);
+        if (r.c.takeSound() == Sfx::Purr) ++purrs;
+        r.run(33);
+    }
+    CHECK(purrs >= 2 && purrs <= 3);
+}
+
+static void test_yawns_once_when_dozing_off() {
+    Rig r;
+    int yawns = 0;
+    for (int i = 0; i < 200; ++i) {  // 100 s idle
+        r.run(500);
+        if (r.c.takeSound() == Sfx::Yawn) ++yawns;
+    }
+    CHECK(yawns == 1);
+}
+
+static void test_mouth_sings_along() {
+    Rig r;
+    r.c.onCommand(VoiceCommand::ILoveYou, r.now);
+    r.c.takeSound();
+    bool moved = false;
+    for (int i = 0; i < 10; ++i) {
+        r.run(33);
+        if (sfxLevelAt(Sfx::Love, 33 * (i + 1)) > 0.3f) moved = true;
+    }
+    CHECK(moved);
+}
+
+static void test_sfx_render_matches_length() {
+    for (int i = 1; i < (int)Sfx::Count; ++i) {
+        Sfx s = (Sfx)i;
+        size_t n = sfxSamples(s);
+        CHECK(n > 0);
+        int16_t* buf = new int16_t[n + 16];
+        for (size_t k = 0; k < n + 16; ++k) buf[k] = 0x5A5A;
+        CHECK(sfxRender(s, buf) == n);
+        for (size_t k = n; k < n + 16; ++k) CHECK(buf[k] == 0x5A5A);  // no overrun
+        CHECK(buf[0] == 0);                                           // starts silent (fade-in)
+        CHECK(sfxLevelAt(s, sfxDurationMs(s) + 1) == 0.0f);
+        delete[] buf;
+    }
+}
+
 int main() {
     struct { const char* name; void (*fn)(); } tests[] = {
         {"tap makes happy then neutral", test_tap_makes_happy_then_neutral},
@@ -193,6 +276,12 @@ int main() {
         {"command reaction survives speech end", test_command_reaction_not_overridden_by_speech_end},
         {"low battery is sleepy", test_low_battery_is_sleepy},
         {"phrases valid for recognizer", test_phrases_are_valid_for_recognizer},
+        {"sounds follow events", test_sounds_follow_events},
+        {"be quiet mutes until sound on", test_be_quiet_mutes_until_sound_on},
+        {"petting purrs without spamming", test_petting_purrs_without_spamming},
+        {"yawns once when dozing off", test_yawns_once_when_dozing_off},
+        {"mouth sings along", test_mouth_sings_along},
+        {"sfx render matches length", test_sfx_render_matches_length},
     };
     for (auto& t : tests) {
         int before = failures;

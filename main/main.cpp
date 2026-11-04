@@ -4,6 +4,7 @@
 //   components/face       draws and animates the face (portable)
 //   components/companion  decides how to react to events (portable, unit-tested)
 //   main/voice.cpp        offline speech: "Hey Buddy" wake word + commands
+//   main/sound.cpp        sound effects through the speaker
 //   this file             hardware glue: display, touch, IMU, battery, main loop
 
 #include <math.h>
@@ -19,6 +20,7 @@
 
 #include "Companion.h"
 #include "Face.h"
+#include "sound.h"
 #include "voice.h"
 
 static const char* TAG = "main";
@@ -149,6 +151,8 @@ static void uiTask(void*) {
         }
 
         buddy.update(now);
+        soundPlay(buddy.takeSound());
+        soundUpdate(now);
         if (buddy.wantsDim() != dimmed) {
             dimmed = buddy.wantsDim();
             M5.Display.setBrightness(dimmed ? kDimBrightness : kBrightness);
@@ -181,6 +185,7 @@ extern "C" void app_main(void) {
     face.setSeed(esp_random());
     voiceEvents = xQueueCreate(8, sizeof(VoiceEvent));
     const bool micOk = voiceMicBegin();
+    soundInit();
 
     // Speech runs on core 0; drawing and input get core 1.
     xTaskCreatePinnedToCore(uiTask, "ui", 8192, nullptr, 4, nullptr, 1);

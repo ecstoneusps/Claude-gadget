@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Build the face preview: compiles preview.cpp, then writes
-preview/face_sheet.png (every expression) and preview/face_anim.gif."""
+"""Build the previews: preview/face_sheet.png (every expression),
+preview/face_anim.gif (animation tour) and preview/sounds/*.wav (sound effects)."""
 import pathlib
 import subprocess
 import sys
@@ -45,7 +45,14 @@ def main():
         subprocess.run([str(exe), "anim", str(tmp / "anim.rgb")], check=True, capture_output=True)
         anim = frames(tmp / "anim.rgb")
         anim[0].save(out_dir / "face_anim.gif", save_all=True, append_images=anim[1:], duration=40, loop=0)
-    print("wrote", out_dir / "face_sheet.png", "and", out_dir / "face_anim.gif")
+        sounds = out_dir / "sounds"
+        sounds.mkdir(exist_ok=True)
+        sfx_exe = tmp / "sfx_wav"
+        subprocess.run(["g++", "-std=c++17", "-O2", "-Wall", "-Wextra", "-I", str(ROOT / "components/sfx"),
+                        str(ROOT / "tools/preview/sfx_wav.cpp"), str(ROOT / "components/sfx/Sfx.cpp"),
+                        "-o", str(sfx_exe)], check=True)
+        subprocess.run([str(sfx_exe), str(sounds)], check=True)
+    print("wrote", out_dir / "face_sheet.png", out_dir / "face_anim.gif", "and", sounds)
 
 
 if __name__ == "__main__":

@@ -25,6 +25,10 @@ const CommandPhrase kCommandPhrases[] = {
     {VoiceCommand::BeSad, "be sad"},
     {VoiceCommand::BeAngry, "be angry"},
     {VoiceCommand::BeSurprised, "be surprised"},
+    {VoiceCommand::BeQuiet, "be quiet"},
+    {VoiceCommand::BeQuiet, "quiet please"},
+    {VoiceCommand::SoundOn, "sound on"},
+    {VoiceCommand::SoundOn, "you can talk"},
 };
 const int kCommandPhraseCount = sizeof(kCommandPhrases) / sizeof(kCommandPhrases[0]);
 
@@ -45,6 +49,8 @@ const char* commandName(VoiceCommand c) {
         case VoiceCommand::BeSad:       return "be sad";
         case VoiceCommand::BeAngry:     return "be angry";
         case VoiceCommand::BeSurprised: return "be surprised";
+        case VoiceCommand::BeQuiet:     return "be quiet";
+        case VoiceCommand::SoundOn:     return "sound on";
         default:                        return "none";
     }
 }
@@ -59,6 +65,13 @@ Companion::Companion(Face& face) : face_(face) {}
 void Companion::react(Expression e, uint32_t ms, uint32_t now) {
     reaction_ = e;
     reactionUntil_ = now + ms;
+}
+
+void Companion::play(Sfx s, uint32_t now) {
+    if (muted_ || s == Sfx::None) return;
+    pending_ = s;
+    playing_ = s;
+    soundStart_ = now;
 }
 
 void Companion::look(float x, float y, uint32_t ms, uint32_t now) {
@@ -76,23 +89,38 @@ void Companion::interact(uint32_t now, bool strong) {
     if (wasDozing) {
         react(Expression::Surprised, 900, now);  // "huh? I'm awake!"
         face_.blinkNow();
+        play(Sfx::Wake, now);
     }
 }
 
 void Companion::onTap(uint32_t now) {
     const bool wasDozing = asleep_ || now - lastInteraction_ > sleepAfterMs;
     interact(now, true);
-    if (!wasDozing) react(Expression::Happy, 2500, now);
+    if (!wasDozing) {
+        react(Expression::Happy, 2500, now);
+        play(Sfx::Boop, now);
+    }
 }
 
 void Companion::onHold(uint32_t now) {
     interact(now, true);
     react(Expression::Love, 2000, now);  // refreshed while being petted
+    // Purr on and off while the petting continues.
+    if (!petting_ || now - lastPurr_ > 1500) {
+        play(Sfx::Purr, now);
+        lastPurr_ = now;
+    }
+    petting_ = true;
 }
 
 void Companion::onShake(uint32_t now) {
     interact(now, true);
     react(Expression::Confused, 2500, now);
+    if (!shaking_ || now - lastShakeSound_ > 2000) {
+        play(Sfx::Confused, now);
+        lastShakeSound_ = now;
+    }
+    shaking_ = true;
 }
 
 void Companion::onTilt(float x, float y, uint32_t now) {
@@ -112,6 +140,7 @@ void Companion::onAudio(float db, bool speech, uint32_t now) {
     if (!awaiting_ && jump > clapJumpDb && db > clapMinDb) {
         interact(now, false);
         react(Expression::Surprised, 1200, now);
+        play(Sfx::Surprised, now);
         return;
     }
 
@@ -134,6 +163,7 @@ void Companion::onWakeWord(uint32_t now) {
     voiceEventSeen_ = true;
     reactionUntil_ = now;  // clear any reaction; listening takes over
     face_.blinkNow();
+    play(Sfx::Chirp, now);  // "yes?"
 }
 
 void Companion::onCommand(VoiceCommand cmd, uint32_t now) {
@@ -144,26 +174,45 @@ void Companion::onCommand(VoiceCommand cmd, uint32_t now) {
     reactionUntil_ = now;  // the command decides, not the wake-up surprise
 
     switch (cmd) {
-        case VoiceCommand::Hello:       react(Expression::Happy, 3000, now); break;
-        case VoiceCommand::GoodNight:   asleep_ = true; break;
-        case VoiceCommand::WakeUp:      react(Expression::Surprised, 1000, now); break;
+        case VoiceCommand::Hello:
+            react(Expression::Happy, 3000, now); play(Sfx::Happy, now); break;
+        case VoiceCommand::GoodNight:
+            asleep_ = true; play(Sfx::Yawn, now); break;
+        case VoiceCommand::WakeUp:
+            react(Expression::Surprised, 1000, now); play(Sfx::Wake, now); break;
         case VoiceCommand::HowAreYou:
             react(lowBattery_ ? Expression::Sleepy : Expression::Happy, 2500, now);
+            play(lowBattery_ ? Sfx::Yawn : Sfx::Happy, now);
             break;
-        case VoiceCommand::ILoveYou:    react(Expression::Love, 4000, now); break;
-        case VoiceCommand::GoodJob:     react(Expression::Happy, 3000, now); break;
-        case VoiceCommand::Scold:       react(Expression::Sad, 4000, now); break;
-        case VoiceCommand::ThankYou:    react(Expression::Love, 2500, now); break;
+        case VoiceCommand::ILoveYou:
+            react(Expression::Love, 4000, now); play(Sfx::Love, now); break;
+        case VoiceCommand::GoodJob:
+            react(Expression::Happy, 3000, now); play(Sfx::Happy, now); break;
+        case VoiceCommand::Scold:
+            react(Expression::Sad, 4000, now); play(Sfx::Sad, now); break;
+        case VoiceCommand::ThankYou:
+            react(Expression::Love, 2500, now); play(Sfx::Love, now); break;
         case VoiceCommand::TellJoke:
             react(Expression::Happy, 2500, now);
             laughUntil_ = now + 2500;
+            play(Sfx::Giggle, now);
             break;
-        case VoiceCommand::LookLeft:    look(-1, 0, 2500, now); break;
-        case VoiceCommand::LookRight:   look(1, 0, 2500, now); break;
-        case VoiceCommand::BeHappy:     react(Expression::Happy, 4000, now); break;
-        case VoiceCommand::BeSad:       react(Expression::Sad, 4000, now); break;
-        case VoiceCommand::BeAngry:     react(Expression::Angry, 4000, now); break;
-        case VoiceCommand::BeSurprised: react(Expression::Surprised, 4000, now); break;
+        case VoiceCommand::LookLeft:
+            look(-1, 0, 2500, now); play(Sfx::Boop, now); break;
+        case VoiceCommand::LookRight:
+            look(1, 0, 2500, now); play(Sfx::Boop, now); break;
+        case VoiceCommand::BeHappy:
+            react(Expression::Happy, 4000, now); play(Sfx::Happy, now); break;
+        case VoiceCommand::BeSad:
+            react(Expression::Sad, 4000, now); play(Sfx::Sad, now); break;
+        case VoiceCommand::BeAngry:
+            react(Expression::Angry, 4000, now); play(Sfx::Angry, now); break;
+        case VoiceCommand::BeSurprised:
+            react(Expression::Surprised, 4000, now); play(Sfx::Surprised, now); break;
+        case VoiceCommand::BeQuiet:
+            muted_ = true; react(Expression::Sad, 1500, now); break;
+        case VoiceCommand::SoundOn:
+            muted_ = false; react(Expression::Happy, 2000, now); play(Sfx::Chirp, now); break;
         default: break;
     }
 }
@@ -173,11 +222,23 @@ void Companion::onCommandTimeout(uint32_t now) {
     lastVoiceEvent_ = now;
     voiceEventSeen_ = true;
     react(Expression::Confused, 1500, now);  // "hmm? never mind"
+    play(Sfx::Confused, now);
 }
 
 void Companion::update(uint32_t now) {
     const uint32_t idle = now - lastInteraction_;
     dim_ = asleep_ || idle > dimAfterMs;
+
+    // Yawn once when dozing off from boredom.
+    if (idle > sleepAfterMs && !asleep_) {
+        if (!idleSleepy_) play(Sfx::Yawn, now);
+        idleSleepy_ = true;
+    } else {
+        idleSleepy_ = false;
+    }
+    // Petting/shaking streaks end when the events stop.
+    if (now - lastPurr_ > 2500) petting_ = false;
+    if (now - lastShakeSound_ > 3000) shaking_ = false;
 
     // Expression priority: waiting for a command > reaction > hearing speech > mood.
     Expression want = (asleep_ || lowBattery_ || idle > sleepAfterMs) ? Expression::Sleepy
@@ -206,10 +267,13 @@ void Companion::update(uint32_t now) {
     }
     lookActive_ = override;
 
-    // Laughing: bounce the mouth.
-    if (before(now, laughUntil_)) {
-        face_.setTalkLevel(0.45f + 0.45f * sinf(now * 0.03f));
-    } else {
-        face_.setTalkLevel(0);
+    // Mouth: bounce while laughing, and "sing" along with sound effects.
+    float talk = 0;
+    if (before(now, laughUntil_)) talk = 0.45f + 0.45f * sinf(now * 0.03f);
+    if (playing_ != Sfx::None) {
+        uint32_t t = now - soundStart_;
+        if (t < sfxDurationMs(playing_)) talk = fmaxf(talk, sfxLevelAt(playing_, t));
+        else playing_ = Sfx::None;
     }
+    face_.setTalkLevel(talk);
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include "Face.h"
+#include "Sfx.h"
 
 // Things you can say after "Hey Buddy". The numeric value is the command ID
 // given to the speech recognizer (it must start at 1).
@@ -21,6 +22,8 @@ enum class VoiceCommand : int {
     BeSad,
     BeAngry,
     BeSurprised,
+    BeQuiet,
+    SoundOn,
     Count
 };
 
@@ -59,6 +62,15 @@ public:
 
     void setLowBattery(bool low) { lowBattery_ = low; }
 
+    // Sound effects: the main loop plays whatever this returns (once).
+    Sfx takeSound() {
+        Sfx s = pending_;
+        pending_ = Sfx::None;
+        return s;
+    }
+    void setMuted(bool m) { muted_ = m; }
+    bool isMuted() const { return muted_; }
+
     // Call every frame; updates the face's expression, gaze and mouth.
     void update(uint32_t now);
 
@@ -77,6 +89,7 @@ private:
     void react(Expression e, uint32_t ms, uint32_t now);
     void interact(uint32_t now, bool strong);
     void look(float x, float y, uint32_t ms, uint32_t now);
+    void play(Sfx s, uint32_t now);
 
     Face& face_;
 
@@ -103,4 +116,12 @@ private:
     bool lookActive_ = false;  // whether we currently override the face's gaze
 
     uint32_t laughUntil_ = 0;
+
+    bool muted_ = false;
+    Sfx pending_ = Sfx::None;
+    Sfx playing_ = Sfx::None;   // for lip-sync
+    uint32_t soundStart_ = 0;
+    uint32_t lastPurr_ = 0, lastShakeSound_ = 0;
+    bool petting_ = false, shaking_ = false;
+    bool idleSleepy_ = false;   // already yawned for this idle stretch
 };

@@ -26,3 +26,9 @@ bool voiceStart(QueueHandle_t events);
 // Safe to call from any task.
 float voiceLevelDb();
 bool voiceSpeech();
+
+// Used by the sound player: pause feeding the mic, wait for voicePaused(),
+// then the mic may be switched off. voiceResume() after the mic is back on.
+void voicePause();
+void voiceResume();
+bool voicePaused();

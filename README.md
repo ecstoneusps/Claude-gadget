@@ -1,9 +1,9 @@
 # Claude Gadget: desk companion
 
 A small desk buddy built on the **M5Stack CoreS3** (ESP32-S3). It shows an
-animated face that blinks, glances around, and changes expression. It reacts to
-touch, motion and sound, and understands spoken commands offline after you say
-**"Hey Buddy"**.
+animated face that blinks, glances around, and changes expression. It chirps,
+giggles, purrs and yawns through its speaker, reacts to touch, motion and sound,
+and understands spoken commands offline after you say **"Hey Buddy"**.
 
 ![expressions](preview/face_sheet.png)
 
@@ -23,8 +23,10 @@ about 6 seconds to say one of these:
 | tell me a joke / make me laugh | Laughs |
 | look left / look right | Looks that way |
 | be happy / be sad / be angry / be surprised | Shows that expression |
-| good night / go to sleep | Sleeps and dims until "Hey Buddy", a tap, or a shake |
+| good night / go to sleep | Yawns, then sleeps and dims until "Hey Buddy", a tap, or a shake |
 | wake up | Startled awake |
+| be quiet / quiet please | Turns its sounds off |
+| sound on / you can talk | Turns its sounds back on |
 
 If it doesn't catch a command, it looks confused for a moment.
 
@@ -33,6 +35,29 @@ All recognition runs on the device with Espressif's
 wake word and the MultiNet7 English command recognizer. Nothing is sent to the
 internet. To change the phrases, edit `kCommandPhrases` in
 `components/companion/Companion.cpp`. Phrases must be lowercase letters and spaces only.
+
+## Sound effects
+
+Every sound is synthesized in code (`components/sfx/Sfx.cpp`), so there are no
+audio files to manage, and the mouth moves along with each sound. Hear them on a
+PC in `preview/sounds/`:
+
+| Sound | When |
+|---|---|
+| chirp | Heard "Hey Buddy", or sound turned back on |
+| boop | Tapped; looking left or right |
+| happy | Greeted, praised, or told to be happy |
+| giggle | Asked for a joke |
+| love | "I love you", "thank you" |
+| purr | Being petted (repeats while you hold it) |
+| sad / angry / surprised | Scolded or told to show that feeling; a clap surprises it |
+| confused | Shaken, or didn't catch a command |
+| yawn | Dozing off or told good night |
+| wake | Startled awake |
+
+On the CoreS3 the speaker and microphone can't run at the same time, so the
+buddy stops listening while it plays a sound (under a second). It also can't
+hear itself. Volume is `kVolume` in `main/sound.cpp`.
 
 ## Other reactions
 
@@ -52,21 +77,23 @@ internet. To change the phrases, edit `kCommandPhrases` in
 
 ```
 components/face/       Face engine: expressions, tweening, blinking, gaze (portable C++)
-components/companion/  The "brain": events -> expressions, voice command list (portable C++)
+components/companion/  The "brain": events -> expressions + sounds, voice command list (portable C++)
+components/sfx/        Sound effect synthesizer (portable C++)
 main/main.cpp          CoreS3 glue: display, touch, IMU, battery, main loop
 main/voice.cpp         ESP-SR pipeline: mic -> audio front-end -> wake word -> commands
+main/sound.cpp         Plays sound effects, switching the audio hardware mic <-> speaker
 tests/                 Native unit tests for the brain (run on a PC)
 tools/preview/         Renders the face to PNG/GIF on a PC
-partitions.csv         Flash layout (4 MB app + 8 MB speech models)
+partitions.csv         Flash layout (4 MB app + 8 MB speech models; ~1.8 MB and ~3.1 MB used)
 sdkconfig.defaults     Board, PSRAM and speech model settings
 ```
 
-`components/face` and `components/companion` contain no ESP32 code, so they
-build and run on a PC for testing and previews.
+`components/face`, `components/companion` and `components/sfx` contain no ESP32
+code, so they build and run on a PC for testing and previews.
 
 ## Build and flash
 
-This project uses **ESP-IDF** (v5.1 or newer), Espressif's official framework.
+This project uses **ESP-IDF** (tested with v5.4.1), Espressif's official framework.
 ESP-SR's speech models install automatically with it.
 
 1. Install ESP-IDF. The easiest way is VS Code with the **ESP-IDF** extension
@@ -93,7 +120,7 @@ which helps with tuning.
 
 ```
 tests/run_tests.sh                      # unit tests for the brain (needs g++)
-python3 tools/preview/make_preview.py   # face images (needs g++ and Pillow)
+python3 tools/preview/make_preview.py   # face images + sound WAVs (needs g++ and Pillow)
 ```
 
 ## Tuning
@@ -114,6 +141,7 @@ python3 tools/preview/make_preview.py   # face images (needs g++ and Pillow)
 3. ~~Offline wake word and voice commands~~
 4. Test on hardware and tune thresholds
 5. Use both microphones (beamforming) for better pickup across a room
-6. Sound effects through the speaker (chirps, giggles, yawns)
+6. ~~Sound effects through the speaker (chirps, giggles, yawns)~~
 7. Proximity sensor and camera: wake up when someone sits down
-8. Cloud conversation: speech-to-text → LLM → emotion tag drives the face, with spoken replies
+8. Remember the mute setting across restarts
+9. Cloud conversation: speech-to-text → LLM → emotion tag drives the face, with spoken replies
