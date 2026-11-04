@@ -22,7 +22,7 @@ enum class Sfx : uint8_t {
     Count
 };
 
-constexpr uint32_t kSfxSampleRate = 24000;
+constexpr uint32_t kSfxSampleRate = 16000;  // matches the full-duplex I2S rate
 
 const char* sfxName(Sfx s);
 

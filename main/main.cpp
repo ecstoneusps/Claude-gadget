@@ -4,6 +4,7 @@
 //   components/face       draws and animates the face (portable)
 //   components/companion  decides how to react to events (portable, unit-tested)
 //   main/voice.cpp        offline speech: "Hey Buddy" wake word + commands
+//   main/audio_io.cpp     full-duplex audio: both mics + speaker at once
 //   main/sound.cpp        sound effects through the speaker
 //   main/proximity.cpp    proximity sensor: notices you sitting down
 //   main/camera.cpp       camera + face detection: looks at you
@@ -27,7 +28,9 @@
 #include "Companion.h"
 #include "Face.h"
 #include "Presence.h"
+#include "audio_io.h"
 #include "camera.h"
+#include "i2c_bus.h"
 #include "proximity.h"
 #include "sdcard.h"
 #include "settings.h"
@@ -165,7 +168,9 @@ static void handleFace(uint32_t now) {
 
 static void handleVoice(uint32_t now) {
     if (!voiceOk.load()) return;
-    buddy.onAudio(voiceLevelDb(), voiceSpeech(), now);
+    // The mics stay on while the buddy makes sounds; don't let it react to its
+    // own chirps as if someone clapped or spoke.
+    if (!soundHeardRecently()) buddy.onAudio(voiceLevelDb(), voiceSpeech(), now);
 
     VoiceEvent ev;
     while (xQueueReceive(voiceEvents, &ev, 0) == pdTRUE) {
@@ -249,7 +254,6 @@ static void uiTask(void*) {
             settingsSetBool("muted", savedMuted);
         }
         soundPlay(buddy.takeSound());
-        soundUpdate(now);
         if (buddy.wantsDim() != dimmed) {
             dimmed = buddy.wantsDim();
             M5.Display.setBrightness(percentTo255(dimmed ? config.dimBrightness : config.brightness));
@@ -267,6 +271,8 @@ static void uiTask(void*) {
 
 extern "C" void app_main(void) {
     auto cfg = M5.config();
+    cfg.internal_mic = false;  // audio_io.cpp drives the mics and speaker itself (full duplex)
+    cfg.internal_spk = false;
     M5.begin(cfg);
     M5.Display.setRotation(1);  // landscape, 320x240
     loadSettings();
@@ -284,10 +290,11 @@ extern "C" void app_main(void) {
     settingsBegin();
     buddy.setMuted(settingsGetBool("muted", false));
     voiceEvents = xQueueCreate(8, sizeof(VoiceEvent));
-    const bool cameraOk = cameraBegin();  // before other tasks touch the I2C bus
-    const bool micOk = voiceMicBegin();
+    sharedI2cBus();                       // before other tasks touch the I2C bus
+    const bool cameraOk = cameraBegin();
+    const bool micOk = audioBegin();
     soundInit();
-    soundSetVolume(percentTo255(config.volume));
+    soundSetVolume(config.volume);
 
     // Speech runs on core 0; drawing and input get core 1.
     xTaskCreatePinnedToCore(uiTask, "ui", 8192, nullptr, 4, nullptr, 1);

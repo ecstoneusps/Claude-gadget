@@ -2,7 +2,6 @@
 
 #include <atomic>
 
-#include <M5Unified.h>
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/task.h"
@@ -18,10 +17,11 @@
 #include "model_path.h"
 
 #include "Companion.h"  // command phrase table
+#include "audio_io.h"
 
 static const char* TAG = "voice";
 
-static constexpr uint32_t kSampleRate = 16000;      // what ESP-SR expects
+static_assert(kAudioSampleRate == 16000, "ESP-SR expects 16 kHz audio");
 // The CoreS3 has two microphones. With both, ESP-SR's blind source separation
 // pulls your voice apart from other sounds (TV, fan, music) and the wake word
 // detector listens on both channels. Costs ~25% more of one CPU core and
@@ -38,13 +38,6 @@ static QueueHandle_t s_events = nullptr;
 static std::atomic<float> s_levelDb{-90.0f};
 static std::atomic<bool> s_speech{false};
 
-// Pause handshake with the sound player (the mic and speaker can't run together).
-static std::atomic<bool> s_feeding{false}, s_pauseReq{false}, s_paused{false};
-
-void voicePause() { s_pauseReq.store(true); }
-void voiceResume() { s_pauseReq.store(false); }
-bool voicePaused() { return !s_feeding.load() || s_paused.load(); }
-
 float voiceLevelDb() { return s_levelDb.load(); }
 bool voiceSpeech() { return s_speech.load(); }
 
@@ -53,38 +46,27 @@ static void post(VoiceEvent::Type type, int id = 0, float prob = 0) {
     xQueueSend(s_events, &ev, 0);  // drop rather than block if the UI is behind
 }
 
-// Mic -> AFE. M5Unified records asynchronously and queues up to two buffers,
-// so we rotate three: only queue a new recording when a slot is free, and
-// at that point the buffer queued two calls ago is complete.
+// Mics -> AFE. The duplex driver delivers both mics as interleaved stereo,
+// exactly the "MM" layout the dual-mic front-end wants. In single-mic
+// fallback the left mic is used on its own.
 static void feedTask(void*) {
     const int chunk = s_afe->get_feed_chunksize(s_afeData);
     const int channels = s_afe->get_feed_channel_num(s_afeData);
-    const bool stereo = channels == 2;  // interleaved L/R, one channel per mic
-    int16_t* bufs[3];
-    for (auto& b : bufs) b = (int16_t*)heap_caps_calloc(chunk * channels, sizeof(int16_t), MALLOC_CAP_DEFAULT);
+    int16_t* stereo = (int16_t*)heap_caps_calloc(chunk * 2, sizeof(int16_t), MALLOC_CAP_DEFAULT);
+    int16_t* mono = channels == 1 ? (int16_t*)heap_caps_calloc(chunk, sizeof(int16_t), MALLOC_CAP_DEFAULT) : nullptr;
     ESP_LOGI(TAG, "feed: %d samples x %d ch per chunk", chunk, channels);
 
-    int idx = 0, primed = 0;
-    s_feeding.store(true);
     while (true) {
-        if (s_pauseReq.load()) {
-            // Let queued recordings finish, then park until the sound is done.
-            while (M5.Mic.isRecording()) vTaskDelay(1);
-            s_paused.store(true);
-            while (s_pauseReq.load()) vTaskDelay(pdMS_TO_TICKS(5));
-            s_paused.store(false);
-            primed = 0;  // old buffers are stale
+        if (!audioReadStereo(stereo, chunk)) {
+            vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
-        while (M5.Mic.isRecording() >= 2) vTaskDelay(1);
-        M5.Mic.record(bufs[idx], chunk * channels, kSampleRate, stereo);
-        const int done = (idx + 1) % 3;  // queued two calls ago
-        idx = (idx + 1) % 3;
-        if (primed < 2) {
-            ++primed;
-            continue;
+        if (mono) {
+            for (int i = 0; i < chunk; ++i) mono[i] = stereo[2 * i];
+            s_afe->feed(s_afeData, mono);
+        } else {
+            s_afe->feed(s_afeData, stereo);
         }
-        s_afe->feed(s_afeData, bufs[done]);
     }
 }
 
@@ -132,19 +114,6 @@ static void detectTask(void*) {
         awaiting = false;
         s_afe->enable_wakenet(s_afeData);
     }
-}
-
-bool voiceMicBegin() {
-    // The CoreS3 can't use the speaker and the mic at the same time in M5Unified.
-    M5.Speaker.end();
-    auto micCfg = M5.Mic.config();
-    micCfg.sample_rate = kSampleRate;
-    M5.Mic.config(micCfg);
-    if (!M5.Mic.begin()) {
-        ESP_LOGE(TAG, "mic init failed");
-        return false;
-    }
-    return true;
 }
 
 // Creates the audio front-end for the given input format ("M" or "MM").

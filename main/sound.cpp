@@ -1,23 +1,50 @@
 #include "sound.h"
 
-#include <M5Unified.h>
+#include <atomic>
+
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
-#include "voice.h"
+#include "audio_io.h"
 
 static const char* TAG = "sound";
 
-static uint8_t s_volume = 160;                   // 0..255, set from settings.txt
-static constexpr uint32_t kPauseTimeoutMs = 300; // don't wait forever for the mic to park
+static_assert(kSfxSampleRate == kAudioSampleRate, "effects must be rendered at the I2S rate");
 
 static int16_t* s_pcm[(int)Sfx::Count];
 static size_t s_len[(int)Sfx::Count];
 
-enum class State { Idle, WaitMic, Playing };
-static State s_state = State::Idle;
-static Sfx s_pending = Sfx::None;
-static uint32_t s_since = 0;
+static TaskHandle_t s_player = nullptr;
+static std::atomic<int> s_request{(int)Sfx::None};
+static std::atomic<bool> s_playing{false};
+static std::atomic<int64_t> s_lastSoundUs{0};
+
+// Streams the requested sound in short chunks, so a newer request cuts in
+// within a few milliseconds instead of waiting for the old sound to end.
+static void playerTask(void*) {
+    constexpr int kChunk = 256;  // 16 ms
+    while (true) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        int req;
+        while ((req = s_request.exchange((int)Sfx::None)) != (int)Sfx::None) {
+            s_playing.store(true);
+            const int16_t* pcm = s_pcm[req];
+            size_t left = s_len[req];
+            while (left > 0 && s_request.load() == (int)Sfx::None) {
+                const int n = left < (size_t)kChunk ? (int)left : kChunk;
+                audioWrite(pcm, n);
+                pcm += n;
+                left -= n;
+                s_lastSoundUs.store(esp_timer_get_time());
+            }
+        }
+        s_playing.store(false);
+        s_lastSoundUs.store(esp_timer_get_time());
+    }
+}
 
 void soundInit() {
     size_t total = 0;
@@ -33,54 +60,19 @@ void soundInit() {
         sfxRender(s, s_pcm[i]);
         total += s_len[i] * sizeof(int16_t);
     }
-    M5.Speaker.setVolume(s_volume);
+    // Core 1 next to the UI; it mostly waits on the I2S DMA.
+    xTaskCreatePinnedToCore(playerTask, "sound", 3072, nullptr, 5, &s_player, 1);
     ESP_LOGI(TAG, "rendered %d effects, %u KB", (int)Sfx::Count - 1, (unsigned)(total / 1024));
 }
 
-void soundSetVolume(uint8_t volume) {
-    s_volume = volume;
-    M5.Speaker.setVolume(volume);
-}
+void soundSetVolume(int percent) { audioSetVolume(percent); }
 
 void soundPlay(Sfx s) {
-    if (s != Sfx::None && s_len[(int)s] > 0) s_pending = s;
+    if (s == Sfx::None || s_len[(int)s] == 0 || !s_player) return;
+    s_request.store((int)s);
+    xTaskNotifyGive(s_player);
 }
 
-static void startPending(uint32_t now) {
-    const int i = (int)s_pending;
-    s_pending = Sfx::None;
-    // stop_current_sound = true: a new reaction interrupts the old one.
-    M5.Speaker.playRaw(s_pcm[i], s_len[i], kSfxSampleRate, false, 1, 0, true);
-    s_since = now;
-}
-
-void soundUpdate(uint32_t now) {
-    switch (s_state) {
-        case State::Idle:
-            if (s_pending == Sfx::None) return;
-            voicePause();
-            s_state = State::WaitMic;
-            s_since = now;
-            [[fallthrough]];
-
-        case State::WaitMic:
-            if (!voicePaused() && now - s_since < kPauseTimeoutMs) return;
-            M5.Mic.end();
-            M5.Speaker.begin();
-            startPending(now);
-            s_state = State::Playing;
-            return;
-
-        case State::Playing:
-            if (s_pending != Sfx::None) {
-                startPending(now);
-                return;
-            }
-            if (M5.Speaker.isPlaying() || now - s_since < 50) return;
-            M5.Speaker.end();
-            M5.Mic.begin();
-            voiceResume();
-            s_state = State::Idle;
-            return;
-    }
+bool soundHeardRecently(uint32_t tailMs) {
+    return s_playing.load() || esp_timer_get_time() - s_lastSoundUs.load() < (int64_t)tailMs * 1000;
 }

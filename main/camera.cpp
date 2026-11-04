@@ -9,6 +9,7 @@
 #include "freertos/task.h"
 
 #include "human_face_detect.hpp"
+#include "i2c_bus.h"
 
 static const char* TAG = "camera";
 
@@ -19,8 +20,8 @@ static camera_config_t makeConfig() {
     c.pin_pwdn = -1;
     c.pin_reset = -1;
     c.pin_xclk = -1;  // the CoreS3 clocks the sensor itself
-    c.pin_sccb_sda = 12;
-    c.pin_sccb_scl = 11;
+    c.pin_sccb_sda = -1;  // -1: reuse the already-open internal I2C bus (see i2c_bus.h)
+    c.pin_sccb_scl = -1;
     c.pin_d7 = 47;
     c.pin_d6 = 48;
     c.pin_d5 = 16;
@@ -41,7 +42,7 @@ static camera_config_t makeConfig() {
     c.fb_count = 2;
     c.fb_location = CAMERA_FB_IN_PSRAM;
     c.grab_mode = CAMERA_GRAB_LATEST;  // always analyze the newest frame
-    c.sccb_i2c_port = -1;
+    c.sccb_i2c_port = 1;
     return c;
 }
 
@@ -54,14 +55,11 @@ static std::atomic<uint32_t> s_intervalMs{200};
 static bool s_cameraOk = false;
 
 bool cameraBegin() {
-    // The camera's control bus (SCCB) is the CoreS3's internal I2C bus, which
-    // M5Unified is using. Hand the port over so the camera driver can open it
-    // with ESP-IDF's I2C driver, then re-attach M5Unified: M5GFX notices the
-    // port is already open and shares it instead of taking it over.
-    M5.In_I2C.release();
+    // The camera's control bus (SCCB) is the CoreS3's internal I2C bus, shared
+    // with M5Unified and the audio chips through one ESP-IDF bus handle.
+    if (!sharedI2cBus()) return false;
     camera_config_t cfg = makeConfig();
     esp_err_t err = esp_camera_init(&cfg);
-    M5.In_I2C.begin();
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "camera init failed (%s); face tracking disabled", esp_err_to_name(err));
         return false;

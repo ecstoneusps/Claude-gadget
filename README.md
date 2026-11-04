@@ -79,9 +79,12 @@ PC in `preview/sounds/`:
 | yawn | Dozing off or told good night |
 | wake | Startled awake |
 
-On the CoreS3 the speaker and microphone can't run at the same time, so the
-buddy stops listening while it plays a sound (under a second). It also can't
-hear itself. Volume is `kVolume` in `main/sound.cpp`.
+Audio is **full duplex**: the speaker and both microphones run at the same
+time on one I2S port, so it keeps listening while it chirps. That covers "Hey
+Buddy" and commands. Its own sounds are ignored by the clap and "someone is
+talking" reactions. The approach follows
+[xiaozhi-esp32](https://github.com/78/xiaozhi-esp32)'s CoreS3 driver (MIT),
+using Espressif's `esp_codec_dev`. Volume is `volume` in `settings.txt`.
 
 ## Other reactions
 
@@ -118,7 +121,9 @@ components/companion/  The "brain": events -> expressions + sounds, voice comman
 components/sfx/        Sound effect synthesizer (portable C++)
 main/main.cpp          CoreS3 glue: display, touch, IMU, battery, main loop
 main/voice.cpp         ESP-SR pipeline: mic -> audio front-end -> wake word -> commands
-main/sound.cpp         Plays sound effects, switching the audio hardware mic <-> speaker
+main/audio_io.cpp      Full-duplex audio: ES7210 mics + AW88298 speaker amp on one I2S port
+main/sound.cpp         Sound effect player task (streams to the speaker while the mics listen)
+main/i2c_bus.cpp       The shared internal I2C bus (M5Unified, camera and audio chips)
 main/proximity.cpp     LTR-553 proximity sensor driver (presence logic is in components/companion/Presence.*)
 main/camera.cpp        Camera setup and face detection task
 main/settings.cpp      Settings kept across restarts in flash (NVS): currently mute

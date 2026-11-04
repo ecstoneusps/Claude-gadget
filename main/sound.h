@@ -2,10 +2,13 @@
 #include <stdint.h>
 #include "Sfx.h"
 
-// Plays the synthesized sound effects through the CoreS3 speaker. Call from
-// the UI task only (it owns the I2C bus used to switch mic <-> speaker).
+// Plays the synthesized sound effects through the CoreS3 speaker, in the
+// background while the microphones keep listening (see audio_io.h).
 
-void soundInit();                 // pre-renders every effect into PSRAM
-void soundSetVolume(uint8_t volume);  // 0..255
-void soundPlay(Sfx s);            // queue a sound (the newest request wins)
-void soundUpdate(uint32_t nowMs); // drive playback; call every loop
+void soundInit();                    // pre-renders every effect and starts the player task
+void soundSetVolume(int percent);    // 0-100
+void soundPlay(Sfx s);               // start a sound, interrupting any playing one
+
+// True while a sound plays and for `tailMs` after, so the mic-based reactions
+// (clap, "someone is talking") can ignore the buddy's own noises.
+bool soundHeardRecently(uint32_t tailMs = 300);
