@@ -4,7 +4,7 @@
 #include "freertos/queue.h"
 
 // Offline speech pipeline (Espressif ESP-SR):
-//   CoreS3 mic -> audio front-end (noise suppression, voice activity,
+//   CoreS3 mics (both, as stereo) -> audio front-end (source separation, voice activity,
 //   "Hey Buddy" wake word) -> MultiNet7 command recognizer.
 // Runs in two FreeRTOS tasks on core 0 and posts events to a queue.
 

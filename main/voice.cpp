@@ -22,6 +22,11 @@
 static const char* TAG = "voice";
 
 static constexpr uint32_t kSampleRate = 16000;      // what ESP-SR expects
+// The CoreS3 has two microphones. With both, ESP-SR's blind source separation
+// pulls your voice apart from other sounds (TV, fan, music) and the wake word
+// detector listens on both channels. Costs ~25% more of one CPU core and
+// ~400 KB more PSRAM than a single mic. Set to false to compare.
+static constexpr bool kUseBothMics = true;
 static constexpr int kCommandWindowMs = 6000;       // time to say a command after "Hey Buddy"
 
 static const esp_afe_sr_iface_t* s_afe = nullptr;
@@ -54,6 +59,7 @@ static void post(VoiceEvent::Type type, int id = 0, float prob = 0) {
 static void feedTask(void*) {
     const int chunk = s_afe->get_feed_chunksize(s_afeData);
     const int channels = s_afe->get_feed_channel_num(s_afeData);
+    const bool stereo = channels == 2;  // interleaved L/R, one channel per mic
     int16_t* bufs[3];
     for (auto& b : bufs) b = (int16_t*)heap_caps_calloc(chunk * channels, sizeof(int16_t), MALLOC_CAP_DEFAULT);
     ESP_LOGI(TAG, "feed: %d samples x %d ch per chunk", chunk, channels);
@@ -71,7 +77,7 @@ static void feedTask(void*) {
             continue;
         }
         while (M5.Mic.isRecording() >= 2) vTaskDelay(1);
-        M5.Mic.record(bufs[idx], chunk * channels, kSampleRate);
+        M5.Mic.record(bufs[idx], chunk * channels, kSampleRate, stereo);
         const int done = (idx + 1) % 3;  // queued two calls ago
         idx = (idx + 1) % 3;
         if (primed < 2) {
@@ -141,21 +147,10 @@ bool voiceMicBegin() {
     return true;
 }
 
-bool voiceStart(QueueHandle_t events) {
-    s_events = events;
-
-    srmodel_list_t* models = esp_srmodel_init("model");
-    if (!models) {
-        ESP_LOGE(TAG, "no speech models found in the 'model' partition (flash with `idf.py flash`)");
-        return false;
-    }
-
-    // Audio front-end: one mic channel, wake word + voice activity detection.
-    afe_config_t* cfg = afe_config_init("M", models, AFE_TYPE_SR, AFE_MODE_LOW_COST);
-    if (!cfg) {
-        ESP_LOGE(TAG, "afe_config_init failed");
-        return false;
-    }
+// Creates the audio front-end for the given input format ("M" or "MM").
+static bool createAfe(srmodel_list_t* models, const char* format) {
+    afe_config_t* cfg = afe_config_init(format, models, AFE_TYPE_SR, AFE_MODE_LOW_COST);
+    if (!cfg) return false;
     cfg->wakenet_model_name = esp_srmodel_filter(models, ESP_WN_PREFIX, NULL);
     cfg->wakenet_init = cfg->wakenet_model_name != nullptr;
     cfg->vad_init = true;
@@ -167,7 +162,28 @@ bool voiceStart(QueueHandle_t events) {
     s_afe = esp_afe_handle_from_config(cfg);
     s_afeData = s_afe ? s_afe->create_from_config(cfg) : nullptr;
     afe_config_free(cfg);
-    if (!s_afeData) {
+    if (!s_afeData) return false;
+    ESP_LOGI(TAG, "audio front-end (%s, %d mic channel%s):", format,
+             s_afe->get_feed_channel_num(s_afeData), format[1] ? "s" : "");
+    s_afe->print_pipeline(s_afeData);  // e.g. |SE(BSS)| -> |VAD| -> |WakeNet|
+    return true;
+}
+
+bool voiceStart(QueueHandle_t events) {
+    s_events = events;
+
+    srmodel_list_t* models = esp_srmodel_init("model");
+    if (!models) {
+        ESP_LOGE(TAG, "no speech models found in the 'model' partition (flash with `idf.py flash`)");
+        return false;
+    }
+
+    // Audio front-end: noise handling, voice activity detection and the wake
+    // word. Prefer both mics ("MM"); fall back to one ("M") if that fails.
+    if (kUseBothMics && !createAfe(models, "MM")) {
+        ESP_LOGW(TAG, "dual-mic front-end failed; falling back to one mic");
+    }
+    if (!s_afeData && !createAfe(models, "M")) {
         ESP_LOGE(TAG, "failed to create audio front-end");
         return false;
     }

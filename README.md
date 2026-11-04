@@ -38,6 +38,12 @@ wake word and the MultiNet7 English command recognizer. Nothing is sent to the
 internet. To change the phrases, edit `kCommandPhrases` in
 `components/companion/Companion.cpp`. Phrases must be lowercase letters and spaces only.
 
+It listens with **both of the CoreS3's microphones**. ESP-SR's blind source
+separation uses the two channels to pull your voice apart from other sounds,
+like a TV, fan or music, and the wake word detector checks both. To compare
+against a single mic, set `kUseBothMics = false` in `main/voice.cpp`. The serial
+log prints the active audio chain at boot, such as `|SE(BSS)| -> |VAD| -> |WakeNet|`.
+
 ## Sound effects
 
 Every sound is synthesized in code (`components/sfx/Sfx.cpp`), so there are no
@@ -159,7 +165,7 @@ python3 tools/preview/make_preview.py   # face images + sound WAVs (needs g++ an
 2. ~~Touch, motion and sound reactions~~
 3. ~~Offline wake word and voice commands~~
 4. Test on hardware and tune thresholds
-5. Use both microphones (beamforming) for better pickup across a room
+5. ~~Use both microphones for better pickup across a room~~
 6. ~~Sound effects through the speaker (chirps, giggles, yawns)~~
 7. Proximity sensor and camera: wake up when someone sits down
 8. Remember the mute setting across restarts
