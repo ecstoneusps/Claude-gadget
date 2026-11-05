@@ -22,8 +22,10 @@ struct VoiceEvent {
 // Loads the models and starts the pipeline (takes a few seconds). Call after
 // audioBegin(). Returns false if the speech models are missing or memory ran out.
 // `extraPhrases` (from settings.txt) are added to the built-in phrase list.
+// `twoMics` uses both microphones (heavier; see voice.cpp).
 bool voiceStart(QueueHandle_t events,
-                const std::vector<std::pair<VoiceCommand, std::string>>& extraPhrases = {});
+                const std::vector<std::pair<VoiceCommand, std::string>>& extraPhrases = {},
+                bool twoMics = false);
 
 // Latest audio level in dBFS and whether someone seems to be talking.
 // Safe to call from any task.

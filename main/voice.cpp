@@ -22,11 +22,6 @@
 static const char* TAG = "voice";
 
 static_assert(kAudioSampleRate == 16000, "ESP-SR expects 16 kHz audio");
-// The CoreS3 has two microphones. With both, ESP-SR's blind source separation
-// pulls your voice apart from other sounds (TV, fan, music) and the wake word
-// detector listens on both channels. Costs ~25% more of one CPU core and
-// ~400 KB more PSRAM than a single mic. Set to false to compare.
-static constexpr bool kUseBothMics = true;
 static constexpr int kCommandWindowMs = 6000;       // time to say a command after "Hey Buddy"
 
 static const esp_afe_sr_iface_t* s_afe = nullptr;
@@ -143,7 +138,7 @@ static bool createAfe(srmodel_list_t* models, const char* format) {
 }
 
 bool voiceStart(QueueHandle_t events,
-                const std::vector<std::pair<VoiceCommand, std::string>>& extraPhrases) {
+                const std::vector<std::pair<VoiceCommand, std::string>>& extraPhrases, bool twoMics) {
     s_events = events;
 
     srmodel_list_t* models = esp_srmodel_init("model");
@@ -154,7 +149,11 @@ bool voiceStart(QueueHandle_t events,
 
     // Audio front-end: noise handling, voice activity detection and the wake
     // word. Prefer both mics ("MM"); fall back to one ("M") if that fails.
-    if (kUseBothMics && !createAfe(models, "MM")) {
+    // Two mics ("MM") add blind source separation and run the wake word on
+    // both channels. On the CoreS3's quad PSRAM that measured far heavier than
+    // Espressif's benchmarks (it saturated a core and slowed the UI to 5 fps),
+    // so one mic is the default; settings.txt `two_microphones = on` to compare.
+    if (twoMics && !createAfe(models, "MM")) {
         ESP_LOGW(TAG, "dual-mic front-end failed; falling back to one mic");
     }
     if (!s_afeData && !createAfe(models, "M")) {
@@ -192,11 +191,10 @@ bool voiceStart(QueueHandle_t events,
     s_mn->print_active_speech_commands(s_mnData);
     ESP_LOGI(TAG, "MultiNet %s ready, %d phrases", mnName, kCommandPhraseCount + (int)extraPhrases.size());
 
-    // Split across both cores: the front-end (noise separation) runs inside
-    // feed() on core 0; wake word + command recognition run inside fetch() on
-    // core 1, above the UI's priority so speech never waits for drawing.
-    // (All on core 0 starved it: the idle-task watchdog fired every 5 s.)
+    // Single-mic speech fits on core 0 next to face detection (lower
+    // priority), leaving core 1 to drawing, sound and the camera driver.
+    // Two-mic mode is too heavy for one core, so it splits across both.
     xTaskCreatePinnedToCore(feedTask, "sr_feed", 4096, nullptr, 5, nullptr, 0);
-    xTaskCreatePinnedToCore(detectTask, "sr_detect", 8192, nullptr, 5, nullptr, 1);
+    xTaskCreatePinnedToCore(detectTask, "sr_detect", 8192, nullptr, 5, nullptr, twoMics ? 1 : 0);
     return true;
 }

@@ -20,6 +20,7 @@ struct BuddyConfig {
 
     // Voice
     float commandConfidence = 0.0f;  // 0-1
+    bool twoMicrophones = false;     // both mics: better in noise, much more CPU
     std::vector<std::pair<VoiceCommand, std::string>> extraPhrases;
 
     // Camera

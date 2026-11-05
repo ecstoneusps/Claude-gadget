@@ -198,7 +198,7 @@ static void handleVoice(uint32_t now) {
 // Loading the speech models takes a few seconds, so do it off the UI task
 // and let the face animate meanwhile.
 static void voiceInitTask(void*) {
-    if (voiceStart(voiceEvents, config.extraPhrases)) voiceOk.store(true);
+    if (voiceStart(voiceEvents, config.extraPhrases, config.twoMicrophones)) voiceOk.store(true);
     else ESP_LOGW(TAG, "voice disabled; touch and motion still work");
     vTaskDelete(nullptr);
 }

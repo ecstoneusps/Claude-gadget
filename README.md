@@ -40,11 +40,12 @@ wake word and the MultiNet7 English command recognizer. Nothing is sent to the
 internet. To change the phrases, edit `kCommandPhrases` in
 `components/companion/Companion.cpp`. Phrases must be lowercase letters and spaces only.
 
-It listens with **both of the CoreS3's microphones**. ESP-SR's blind source
-separation uses the two channels to pull your voice apart from other sounds,
-like a TV, fan or music, and the wake word detector checks both. To compare
-against a single mic, set `kUseBothMics = false` in `main/voice.cpp`. The serial
-log prints the active audio chain at boot, such as `|SE(BSS)| -> |VAD| -> |WakeNet|`.
+By default it listens with **one microphone**. `two_microphones = on` in
+`settings.txt` uses both: ESP-SR's blind source separation then pulls your voice
+apart from other sounds, and the wake word detector checks both channels. On the
+CoreS3 that costs much more CPU than Espressif's benchmarks suggest. In testing
+it slowed the face animation to 5 fps, so try it if it struggles to hear you in a
+noisy room. The serial log prints the active audio chain at boot.
 
 ## Expressions and emotions
 

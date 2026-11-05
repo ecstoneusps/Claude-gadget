@@ -17,6 +17,7 @@ sleep_after_leaving_seconds  = 20     # doze sooner once you walk away
 
 # --- Voice ---
 command_confidence           = 0      # 0-1; raise to 0.3 or so if it reacts to things you didn't say
+two_microphones              = off    # both mics: hears you better over noise, but slows everything else down
 
 # Extra ways to say a command, separated by commas. Letters and spaces only.
 # Remove the # in front of a line to use it. Commands you can add to:

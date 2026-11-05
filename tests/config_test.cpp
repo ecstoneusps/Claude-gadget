@@ -26,6 +26,7 @@ static void test_default_file_round_trips() {
     CHECK(cfg.sleepAfterSeconds == d.sleepAfterSeconds && cfg.dimAfterSeconds == d.dimAfterSeconds);
     CHECK(cfg.sleepAfterLeavingSeconds == d.sleepAfterLeavingSeconds);
     CHECK(cfg.commandConfidence == d.commandConfidence);
+    CHECK(cfg.twoMicrophones == d.twoMicrophones);
     CHECK(cfg.faceTracking == d.faceTracking && cfg.cameraMirrored == d.cameraMirrored);
     CHECK(cfg.cameraPreview == d.cameraPreview);
     CHECK(cfg.faceGaze > 1.39f && cfg.faceGaze < 1.41f);

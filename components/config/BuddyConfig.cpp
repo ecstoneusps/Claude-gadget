@@ -120,6 +120,8 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
             if (!parseInt(val, 1, 86400, cfg.sleepAfterLeavingSeconds)) bad("must be 1-86400");
         } else if (key == "command_confidence") {
             if (!parseFloat(val, 0.0f, 1.0f, cfg.commandConfidence)) bad("must be 0-1");
+        } else if (key == "two_microphones") {
+            if (!parseBool(val, cfg.twoMicrophones)) bad("must be on or off");
         } else if (key == "face_tracking") {
             if (!parseBool(val, cfg.faceTracking)) bad("must be on or off");
         } else if (key == "camera_mirrored") {
@@ -205,6 +207,7 @@ std::string defaultConfigText() {
     add("");
     add("# --- Voice ---");
     flt("command_confidence", d.commandConfidence, "0-1; raise to 0.3 or so if it reacts to things you didn't say");
+    onoff("two_microphones", d.twoMicrophones, "both mics: hears you better over noise, but slows everything else down");
     add("");
     add("# Extra ways to say a command, separated by commas. Letters and spaces only.");
     add("# Remove the # in front of a line to use it. Commands you can add to:");
