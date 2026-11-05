@@ -154,6 +154,7 @@ void Companion::greet(uint32_t now) {
 }
 
 void Companion::onArrived(uint32_t now) {
+    present_ = true;
     if (awaiting_) return;  // mid-conversation; don't interrupt
     interact(now, true);    // wakes it, even from "good night"
     greet(now);
@@ -176,6 +177,10 @@ void Companion::onFace(float x, float y, uint32_t now) {
     faceSeen_ = true;
     lastFace_ = now;
 
+    // While it can see you it stays awake (but "good night" still wins).
+    const bool dozingNow = now - lastInteraction_ > sleepAfterMs;
+    if (!asleep_ && !dozingNow) lastInteraction_ = now;
+
     // You came back into view: wake up and say hi -- but if you said
     // "good night", it keeps sleeping even though it can see you.
     if (returning && !asleep_ && !awaiting_) {
@@ -188,7 +193,10 @@ void Companion::onFace(float x, float y, uint32_t now) {
 }
 
 void Companion::onLeft(uint32_t now) {
+    present_ = false;
     if (asleep_) return;
+    // The camera still sees you: the proximity sensor is just out of range.
+    if (seesFace(now)) return;
     // Pretend the last interaction was long ago so it dozes off
     // sleepAfterLeftMs from now (unless it was going to sleep sooner anyway).
     const uint32_t idle = now - lastInteraction_;
@@ -331,6 +339,9 @@ void Companion::onCommandTimeout(uint32_t now) {
 }
 
 void Companion::update(uint32_t now) {
+    // Someone at the desk keeps it awake; it starts counting down once they've gone.
+    if (present_ && !asleep_ && now - lastInteraction_ <= sleepAfterMs) lastInteraction_ = now;
+
     const uint32_t idle = now - lastInteraction_;
     dim_ = asleep_ || idle > dimAfterMs;
 

@@ -19,7 +19,14 @@ struct FaceSighting {
     bool found;     // a face was in that frame
     float x, y;     // face center, -1..1 in camera image coordinates (x right, y down)
     float size;     // face height as a fraction of the frame height
+    int box[4];     // best face in pixels: x1, y1, x2, y2
 };
 
 // Latest result. Safe to call from any task.
 FaceSighting faceTrackingLatest();
+
+// Camera preview (a diagnostic, `camera_preview = on` in settings.txt): keeps
+// a copy of the latest 320x240 frame. Copies it into `dst` (big-endian RGB565,
+// as the camera delivers it) if a newer one arrived since the last call.
+void cameraEnablePreview();
+bool cameraCopyPreview(uint16_t* dst, uint32_t* seq);

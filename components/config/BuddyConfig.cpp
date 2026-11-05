@@ -124,6 +124,8 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
             if (!parseBool(val, cfg.faceTracking)) bad("must be on or off");
         } else if (key == "camera_mirrored") {
             if (!parseBool(val, cfg.cameraMirrored)) bad("must be on or off");
+        } else if (key == "camera_preview") {
+            if (!parseBool(val, cfg.cameraPreview)) bad("must be on or off");
         } else if (key == "face_gaze") {
             if (!parseFloat(val, 0.0f, 3.0f, cfg.faceGaze)) bad("must be 0-3");
         } else if (key == "proximity") {
@@ -223,6 +225,7 @@ std::string defaultConfigText() {
     onoff("face_tracking", d.faceTracking, "eyes follow your face");
     onoff("camera_mirrored", d.cameraMirrored, "turn on if the eyes look away from you instead of at you");
     flt("face_gaze", d.faceGaze, "how far the eyes turn toward you, 0-3");
+    onoff("camera_preview", d.cameraPreview, "show what the camera sees (green box = face found) instead of the face");
     add("");
     add("# --- Proximity sensor (above the screen) ---");
     onoff("proximity", d.proximity, "wake up when you sit down");

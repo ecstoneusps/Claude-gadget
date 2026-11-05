@@ -17,6 +17,7 @@
 #include <atomic>
 
 #include <M5Unified.h>
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -226,6 +227,23 @@ static void loadSettings() {
              config.faceTracking ? "on" : "off", config.proximity ? "on" : "off");
 }
 
+// Diagnostic view: the camera image with a box around the face it found.
+static void drawCameraPreview() {
+    static uint32_t seq = 0;
+    static uint16_t* frame = (uint16_t*)heap_caps_malloc(320 * 240 * 2, MALLOC_CAP_SPIRAM);
+    if (!frame || !cameraCopyPreview(frame, &seq)) return;
+    canvas.pushImage(0, 0, 320, 240, frame);  // uint16_t* = big-endian RGB565 in M5GFX
+    const FaceSighting f = faceTrackingLatest();
+    if (f.found) {
+        canvas.drawRect(f.box[0], f.box[1], f.box[2] - f.box[0], f.box[3] - f.box[1], TFT_GREEN);
+        canvas.drawRect(f.box[0] + 1, f.box[1] + 1, f.box[2] - f.box[0] - 2, f.box[3] - f.box[1] - 2, TFT_GREEN);
+    }
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setCursor(4, 4);
+    canvas.printf("camera preview  %s", f.found ? "FACE" : "no face");
+    canvas.pushSprite(0, 0);
+}
+
 static void uiTask(void*) {
     const bool proxOk = config.proximity && proximityBegin();
     uint32_t lastFrame = nowMs(), lastBattery = 0, lastImu = 0;
@@ -262,8 +280,12 @@ static void uiTask(void*) {
         if (now - lastFrame >= kFrameMs) {
             face.update(now - lastFrame);
             lastFrame = now;
-            face.draw(canvasAdapter);
-            canvas.pushSprite(0, 0);
+            if (config.cameraPreview) {
+                drawCameraPreview();
+            } else {
+                face.draw(canvasAdapter);
+                canvas.pushSprite(0, 0);
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(2));
     }
@@ -298,7 +320,8 @@ extern "C" void app_main(void) {
 
     // Speech runs on core 0; drawing and input get core 1.
     xTaskCreatePinnedToCore(uiTask, "ui", 8192, nullptr, 4, nullptr, 1);
-    if (cameraOk && config.faceTracking) faceTrackingStart();
+    if (cameraOk && config.cameraPreview) cameraEnablePreview();
+    if (cameraOk && (config.faceTracking || config.cameraPreview)) faceTrackingStart();
     if (micOk) xTaskCreatePinnedToCore(voiceInitTask, "sr_init", 8192, nullptr, 3, nullptr, 0);
     ESP_LOGI(TAG, "desk companion started");
 }

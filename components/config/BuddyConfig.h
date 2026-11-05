@@ -26,6 +26,7 @@ struct BuddyConfig {
     bool faceTracking = true;
     bool cameraMirrored = false;
     float faceGaze = 1.4f;         // 0-3
+    bool cameraPreview = false;    // show the camera image instead of the face (diagnostic)
 
     // Proximity sensor
     bool proximity = true;

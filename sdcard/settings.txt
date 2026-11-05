@@ -31,6 +31,7 @@ command_confidence           = 0      # 0-1; raise to 0.3 or so if it reacts to 
 face_tracking                = on     # eyes follow your face
 camera_mirrored              = off    # turn on if the eyes look away from you instead of at you
 face_gaze                    = 1.4    # how far the eyes turn toward you, 0-3
+camera_preview               = off    # show what the camera sees (green box = face found) instead of the face
 
 # --- Proximity sensor (above the screen) ---
 proximity                    = on     # wake up when you sit down

@@ -465,6 +465,40 @@ static void test_new_face_commands() {
     CHECK(r.expr() == Expression::Silly);
 }
 
+static void test_stays_awake_while_it_sees_you() {
+    Rig r;
+    for (int i = 0; i < 900; ++i) {  // 3 minutes in view, 5 face frames a second
+        r.c.onFace(0.1f, 0, r.now);
+        r.run(200);
+    }
+    CHECK(r.expr() != Expression::Sleepy);
+    CHECK(!r.c.wantsDim());
+    r.run(61000);                     // you step out of view
+    CHECK(r.expr() == Expression::Sleepy);
+}
+
+static void test_stays_awake_while_present() {
+    Rig r;
+    r.c.onArrived(r.now);
+    r.run(180000);                    // 3 minutes at the desk, no face (camera off)
+    CHECK(r.expr() != Expression::Sleepy);
+    r.c.onLeft(r.now);
+    r.run(21000);
+    CHECK(r.expr() == Expression::Sleepy);
+}
+
+static void test_proximity_leave_ignored_while_face_visible() {
+    Rig r;
+    r.c.onArrived(r.now);
+    r.c.onFace(0, 0, r.now);
+    r.c.onLeft(r.now);                // sensor lost you, camera didn't
+    for (int i = 0; i < 150; ++i) {   // 30 s still in view
+        r.c.onFace(0, 0, r.now);
+        r.run(200);
+    }
+    CHECK(r.expr() != Expression::Sleepy);
+}
+
 int main() {
     struct { const char* name; void (*fn)(); } tests[] = {
         {"tap makes happy then neutral", test_tap_makes_happy_then_neutral},
@@ -499,6 +533,9 @@ int main() {
         {"expression names unique", test_expression_names_unique},
         {"onEmotion shows face and sound", test_on_emotion_shows_face_and_sound},
         {"new face commands", test_new_face_commands},
+        {"stays awake while it sees you", test_stays_awake_while_it_sees_you},
+        {"stays awake while present", test_stays_awake_while_present},
+        {"proximity leave ignored while face visible", test_proximity_leave_ignored_while_face_visible},
     };
     for (auto& t : tests) {
         int before = failures;

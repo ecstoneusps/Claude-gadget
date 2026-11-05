@@ -5,6 +5,10 @@
 #include <M5Unified.h>
 #include "esp_camera.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "esp_heap_caps.h"
+#include "freertos/semphr.h"
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -53,6 +57,29 @@ static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static FaceSighting s_latest = {};
 static std::atomic<uint32_t> s_intervalMs{200};
 static bool s_cameraOk = false;
+static uint16_t* s_preview = nullptr;      // latest frame copy, only in preview mode
+static uint32_t s_previewSeq = 0;
+static SemaphoreHandle_t s_previewLock = nullptr;
+
+void cameraEnablePreview() {
+    if (s_preview) return;
+    s_preview = (uint16_t*)heap_caps_malloc(320 * 240 * 2, MALLOC_CAP_SPIRAM);
+    s_previewLock = xSemaphoreCreateMutex();
+}
+
+bool cameraCopyPreview(uint16_t* dst, uint32_t* seq) {
+    if (!s_preview || !s_previewLock) return false;
+    bool fresh = false;
+    if (xSemaphoreTake(s_previewLock, pdMS_TO_TICKS(5)) == pdTRUE) {
+        if (s_previewSeq != *seq) {
+            memcpy(dst, s_preview, 320 * 240 * 2);
+            *seq = s_previewSeq;
+            fresh = true;
+        }
+        xSemaphoreGive(s_previewLock);
+    }
+    return fresh;
+}
 
 bool cameraBegin() {
     // The camera's control bus (SCCB) is the CoreS3's internal I2C bus, shared
@@ -90,7 +117,9 @@ static void faceTask(void*) {
             continue;
         }
         dl::image::img_t img = {fb->buf, (uint16_t)fb->width, (uint16_t)fb->height, kPixType};
+        const int64_t t0 = esp_timer_get_time();
         std::list<dl::detect::result_t>& results = detector->run(img);
+        const int detectMs = (int)((esp_timer_get_time() - t0) / 1000);
 
         FaceSighting f = {};
         f.seq = ++seq;
@@ -103,6 +132,32 @@ static void faceTask(void*) {
             f.x = ((r.box[0] + r.box[2]) * 0.5f / fb->width) * 2.0f - 1.0f;
             f.y = ((r.box[1] + r.box[3]) * 0.5f / fb->height) * 2.0f - 1.0f;
             f.size = (float)h / fb->height;
+            for (int k = 0; k < 4; ++k) f.box[k] = r.box[k];
+        }
+        if (s_preview && fb->len >= 320 * 240 * 2 &&
+            xSemaphoreTake(s_previewLock, pdMS_TO_TICKS(20)) == pdTRUE) {
+            memcpy(s_preview, fb->buf, 320 * 240 * 2);
+            ++s_previewSeq;
+            xSemaphoreGive(s_previewLock);
+        }
+        // Every ~10 s, a status line whether or not a face was found, so a
+        // camera that runs but never sees anyone can be told from one that
+        // isn't running. Brightness is the frame's mean green channel (0-63)
+        // read both ways round: the plausible-looking one shows the byte order.
+        if (seq % 50 == 1) {
+            const uint8_t* px = fb->buf;
+            const size_t n = fb->width * fb->height;
+            uint32_t sumBE = 0, sumLE = 0;
+            for (size_t i = 0; i < n; i += 97) {
+                const uint16_t be = (uint16_t)(px[2 * i] << 8 | px[2 * i + 1]);
+                const uint16_t le = (uint16_t)(px[2 * i + 1] << 8 | px[2 * i]);
+                sumBE += (be >> 5) & 0x3F;
+                sumLE += (le >> 5) & 0x3F;
+            }
+            const size_t samples = (n + 96) / 97;
+            ESP_LOGI(TAG, "frame %ux%u, %u bytes, detect %d ms, %d face(s); green BE %u / LE %u",
+                     fb->width, fb->height, (unsigned)fb->len, detectMs, (int)results.size(),
+                     (unsigned)(sumBE / samples), (unsigned)(sumLE / samples));
         }
         esp_camera_fb_return(fb);
 

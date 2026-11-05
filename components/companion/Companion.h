@@ -148,6 +148,7 @@ private:
     uint32_t lastGreeting_ = 0;
     void greet(uint32_t now);
 
+    bool present_ = false;      // proximity sensor says someone is at the desk
     bool faceSeen_ = false;
     uint32_t lastFace_ = 0;
     float faceX_ = 0, faceY_ = 0;
