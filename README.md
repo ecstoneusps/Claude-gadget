@@ -176,8 +176,11 @@ To flash it without installing ESP-IDF:
 3. With the CoreS3 plugged in:
    ```
    cd desk-companion-firmware/build
-   python -m esptool --chip esp32s3 write_flash @flash_args
+   python -m esptool --chip esp32s3 write-flash '@flash_args'
    ```
+   Keep the quotes around `'@flash_args'`. Windows PowerShell treats a bare `@`
+   as special and silently drops the argument, so esptool reports a missing
+   address and filename.
 
 The artifact also contains `dependencies.lock`, the exact library versions that
 build used. Commit it to the repo root to pin those versions for future builds.
