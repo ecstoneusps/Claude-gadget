@@ -43,11 +43,11 @@ static camera_config_t makeConfig() {
     c.pixel_format = PIXFORMAT_RGB565;
     c.frame_size = FRAMESIZE_QVGA;  // 320x240 is plenty for finding a face
     c.jpeg_quality = 0;
-    c.fb_count = 1;
+    c.fb_count = 2;
     c.fb_location = CAMERA_FB_IN_PSRAM;
-    // Capture only when face detection asks for a frame (5 a second), not
-    // continuously: the driver's frame copying is real CPU work.
-    c.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+    // Always hand face detection the newest frame. (Capturing only on request
+    // gave it stale frames, so it lagged far behind someone moving.)
+    c.grab_mode = CAMERA_GRAB_LATEST;
     c.sccb_i2c_port = 1;
     return c;
 }
@@ -181,8 +181,10 @@ static void faceTask(void*) {
 
 void faceTrackingStart() {
     if (!s_cameraOk) return;
-    // Core 1, below the UI task's priority so drawing stays smooth.
-    xTaskCreatePinnedToCore(faceTask, "face", 12 * 1024, nullptr, 2, nullptr, 1);
+    // Core 0, below the mic front-end (priority 5). Core 1 carries wake word +
+    // commands, drawing and sound; at the lowest priority there, detection
+    // was starved and only caught a face if you held still.
+    xTaskCreatePinnedToCore(faceTask, "face", 12 * 1024, nullptr, 3, nullptr, 0);
 }
 
 void faceTrackingSetInterval(uint32_t ms) { s_intervalMs.store(ms); }
