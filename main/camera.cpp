@@ -94,10 +94,39 @@ bool cameraBegin() {
         return false;
     }
     if (sensor_t* s = esp_camera_sensor_get()) {
+        // Brightest auto-exposure target: indoors the default image is dark
+        // (mean green ~8/63 measured), which made faces hard to find.
+        if (s->set_ae_level) s->set_ae_level(s, 2);
         ESP_LOGI(TAG, "camera ready (sensor PID 0x%02x)", s->id.PID);
     }
     s_cameraOk = true;
     return true;
+}
+
+// Brightens a dark big-endian RGB565 frame in place toward a mid-level mean,
+// so the face model (trained on normally exposed photos) sees contrast.
+// Returns the mean green level (0-63) before brightening.
+static int autoBrighten(uint8_t* px, size_t pixels) {
+    uint32_t sum = 0, count = 0;
+    for (size_t i = 0; i < pixels; i += 7, ++count) sum += ((px[2 * i] << 8 | px[2 * i + 1]) >> 5) & 0x3F;
+    const int mean = count ? (int)(sum / count) : 0;
+    constexpr int kTarget = 28;  // about 45% brightness
+    if (mean <= 0 || mean >= kTarget) return mean;
+    int gain256 = kTarget * 256 / mean;  // fixed point
+    if (gain256 > 4 * 256) gain256 = 4 * 256;
+    for (size_t i = 0; i < pixels; ++i) {
+        const uint16_t v = (uint16_t)(px[2 * i] << 8 | px[2 * i + 1]);
+        int r = ((v >> 11) & 0x1F) * gain256 >> 8;
+        int g = ((v >> 5) & 0x3F) * gain256 >> 8;
+        int b = (v & 0x1F) * gain256 >> 8;
+        if (r > 31) r = 31;
+        if (g > 63) g = 63;
+        if (b > 31) b = 31;
+        const uint16_t o = (uint16_t)(r << 11 | g << 5 | b);
+        px[2 * i] = o >> 8;
+        px[2 * i + 1] = o & 0xFF;
+    }
+    return mean;
 }
 
 static void faceTask(void*) {
@@ -120,6 +149,7 @@ static void faceTask(void*) {
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
+        const int rawBrightness = autoBrighten(fb->buf, (size_t)fb->width * fb->height);
         dl::image::img_t img = {fb->buf, (uint16_t)fb->width, (uint16_t)fb->height, kPixType};
         const int64_t t0 = esp_timer_get_time();
         std::list<dl::detect::result_t>& results = detector->run(img);
@@ -149,25 +179,11 @@ static void faceTask(void*) {
             ++s_previewSeq;
             xSemaphoreGive(s_previewLock);
         }
-        // Every ~10 s, a status line whether or not a face was found, so a
-        // camera that runs but never sees anyone can be told from one that
-        // isn't running. Brightness is the frame's mean green channel (0-63)
-        // read both ways round: the plausible-looking one shows the byte order.
+        // Every ~10 s, a status line whether or not a face was found: detection
+        // time, hit rate and the camera's raw brightness (mean green, 0-63).
         if (seq % 50 == 1) {
-            const uint8_t* px = fb->buf;
-            const size_t n = fb->width * fb->height;
-            uint32_t sumBE = 0, sumLE = 0;
-            for (size_t i = 0; i < n; i += 97) {
-                const uint16_t be = (uint16_t)(px[2 * i] << 8 | px[2 * i + 1]);
-                const uint16_t le = (uint16_t)(px[2 * i + 1] << 8 | px[2 * i]);
-                sumBE += (be >> 5) & 0x3F;
-                sumLE += (le >> 5) & 0x3F;
-            }
-            const size_t samples = (n + 96) / 97;
-            ESP_LOGI(TAG, "frame %ux%u, detect %d ms, face found in %u of %u frames; brightness %u/63",
-                     fb->width, fb->height, detectMs, (unsigned)hits, (unsigned)tries,
-                     (unsigned)(sumBE / samples));
-            (void)sumLE;
+            ESP_LOGI(TAG, "frame %ux%u, detect %d ms, face found in %u of %u frames; brightness %d/63 (boosted for detection)",
+                     fb->width, fb->height, detectMs, (unsigned)hits, (unsigned)tries, rawBrightness);
             hits = tries = 0;
         }
         esp_camera_fb_return(fb);
@@ -188,7 +204,7 @@ static void faceTask(void*) {
         const TickType_t now = xTaskGetTickCount();
         const bool justLost = !f.found && lastHit && now - lastHit < pdMS_TO_TICKS(2000);
         const TickType_t elapsed = now - start;
-        const TickType_t wait = pdMS_TO_TICKS(justLost ? 20 : interval);
+        const TickType_t wait = pdMS_TO_TICKS(justLost ? 60 : interval);
         vTaskDelay(elapsed < wait ? wait - elapsed : 1);
     }
 }
