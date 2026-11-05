@@ -171,8 +171,8 @@ void Companion::onFace(float x, float y, uint32_t now) {
         faceX_ = x;
         faceY_ = y;
     } else {
-        faceX_ += (x - faceX_) * 0.5f;
-        faceY_ += (y - faceY_) * 0.5f;
+        faceX_ += (x - faceX_) * 0.8f;  // mostly trust each new sighting: detections are sparse
+        faceY_ += (y - faceY_) * 0.8f;
     }
     faceSeen_ = true;
     lastFace_ = now;

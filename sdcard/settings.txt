@@ -30,7 +30,7 @@ two_microphones              = off    # both mics: hears you better over noise, 
 
 # --- Camera ---
 face_tracking                = on     # eyes follow your face
-camera_mirrored              = on     # flip (on/off) if the eyes look away from you instead of at you
+camera_mirrored              = off    # flip (on/off) if the eyes look away from you instead of at you
 face_gaze                    = 1.4    # how far the eyes turn toward you, 0-3
 camera_preview               = off    # show what the camera sees (green box = face found) instead of the face
 

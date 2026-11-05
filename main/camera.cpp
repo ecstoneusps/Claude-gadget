@@ -104,6 +104,8 @@ static void faceTask(void*) {
     HumanFaceDetect* detector = new HumanFaceDetect();
     ESP_LOGI(TAG, "face detection model loaded");
     uint32_t seq = 0, logged = 0;
+    uint32_t hits = 0, tries = 0;    // detection hit rate, for the status line
+    TickType_t lastHit = 0;
 
     while (true) {
         const uint32_t interval = s_intervalMs.load();
@@ -136,6 +138,11 @@ static void faceTask(void*) {
             f.size = (float)h / fb->height;
             for (int k = 0; k < 4; ++k) f.box[k] = r.box[k];
         }
+        ++tries;
+        if (f.found) {
+            ++hits;
+            lastHit = xTaskGetTickCount();
+        }
         if (s_preview && fb->len >= (size_t)kCamW * kCamH * 2 &&
             xSemaphoreTake(s_previewLock, pdMS_TO_TICKS(20)) == pdTRUE) {
             memcpy(s_preview, fb->buf, kCamW * kCamH * 2);
@@ -157,9 +164,11 @@ static void faceTask(void*) {
                 sumLE += (le >> 5) & 0x3F;
             }
             const size_t samples = (n + 96) / 97;
-            ESP_LOGI(TAG, "frame %ux%u, %u bytes, detect %d ms, %d face(s); green BE %u / LE %u",
-                     fb->width, fb->height, (unsigned)fb->len, detectMs, (int)results.size(),
-                     (unsigned)(sumBE / samples), (unsigned)(sumLE / samples));
+            ESP_LOGI(TAG, "frame %ux%u, detect %d ms, face found in %u of %u frames; brightness %u/63",
+                     fb->width, fb->height, detectMs, (unsigned)hits, (unsigned)tries,
+                     (unsigned)(sumBE / samples));
+            (void)sumLE;
+            hits = tries = 0;
         }
         esp_camera_fb_return(fb);
 
@@ -173,8 +182,13 @@ static void faceTask(void*) {
             ESP_LOGI(TAG, "face at x=%+.2f y=%+.2f size=%.2f", f.x, f.y, f.size);
         }
 
-        const TickType_t elapsed = xTaskGetTickCount() - start;
-        const TickType_t wait = pdMS_TO_TICKS(interval);
+        // Just lost you (seen in the last 2 s)? You probably moved and the
+        // frame blurred: look again right away instead of waiting a full
+        // interval. With nobody there, it settles back to the normal rate.
+        const TickType_t now = xTaskGetTickCount();
+        const bool justLost = !f.found && lastHit && now - lastHit < pdMS_TO_TICKS(2000);
+        const TickType_t elapsed = now - start;
+        const TickType_t wait = pdMS_TO_TICKS(justLost ? 20 : interval);
         vTaskDelay(elapsed < wait ? wait - elapsed : 1);
     }
 }
