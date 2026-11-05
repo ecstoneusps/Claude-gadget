@@ -28,6 +28,7 @@ struct BuddyConfig {
     bool cameraMirrored = false;   // correct for the CoreS3's camera (confirmed on hardware)
     float faceGaze = 1.4f;         // 0-3
     bool cameraPreview = false;    // show the camera image instead of the face (diagnostic)
+    bool accurateFaceModel = true; // "accurate" ESPDet-Pico vs "fast" MSR+MNP
 
     // Proximity sensor
     bool proximity = true;

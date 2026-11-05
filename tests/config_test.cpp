@@ -29,6 +29,7 @@ static void test_default_file_round_trips() {
     CHECK(cfg.twoMicrophones == d.twoMicrophones);
     CHECK(cfg.faceTracking == d.faceTracking && cfg.cameraMirrored == d.cameraMirrored);
     CHECK(cfg.cameraPreview == d.cameraPreview);
+    CHECK(cfg.accurateFaceModel == d.accurateFaceModel);
     CHECK(cfg.faceGaze > 1.39f && cfg.faceGaze < 1.41f);
     CHECK(cfg.proximity == d.proximity && cfg.proximitySensitivity == d.proximitySensitivity);
     CHECK(cfg.flipTiltX == d.flipTiltX && cfg.flipTiltY == d.flipTiltY);
@@ -44,12 +45,14 @@ static void test_values_and_formats() {
                 "command_confidence = 0.35\n"
                 "camera_mirrored = YES\n"
                 "face_tracking = off\n"
-                "flip_tilt_x = true\n",
+                "flip_tilt_x = true\n"
+                "face_model = Fast\n",
                 cfg, w);
     CHECK(w.empty());
     CHECK(cfg.volume == 40 && cfg.brightness == 100 && cfg.sleepAfterSeconds == 300);
     CHECK(cfg.commandConfidence > 0.34f && cfg.commandConfidence < 0.36f);
     CHECK(cfg.cameraMirrored && !cfg.faceTracking && cfg.flipTiltX);
+    CHECK(!cfg.accurateFaceModel);
 }
 
 static void test_bad_lines_warn_and_keep_defaults() {

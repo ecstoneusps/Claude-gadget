@@ -129,9 +129,14 @@ static int autoBrighten(uint8_t* px, size_t pixels) {
     return mean;
 }
 
-static void faceTask(void*) {
-    HumanFaceDetect* detector = new HumanFaceDetect();
-    ESP_LOGI(TAG, "face detection model loaded");
+static void faceTask(void* arg) {
+    const bool accurate = arg != nullptr;
+    // Hardware test: MSR+MNP found a face in only 14-20% of frames even in
+    // bright light; ESPDet-Pico has a much higher published accuracy (mAP
+    // 0.504 vs 0.367).
+    HumanFaceDetect* detector = new HumanFaceDetect(
+        accurate ? HumanFaceDetect::ESPDET_PICO_224_224_FACE : HumanFaceDetect::MSRMNP_S8_V1, false);
+    ESP_LOGI(TAG, "face detection model loaded: %s", accurate ? "ESPDet-Pico 224 (accurate)" : "MSR+MNP (fast)");
     uint32_t seq = 0, logged = 0;
     uint32_t hits = 0, tries = 0;    // detection hit rate, for the status line
     TickType_t lastHit = 0;
@@ -209,12 +214,12 @@ static void faceTask(void*) {
     }
 }
 
-void faceTrackingStart() {
+void faceTrackingStart(bool accurate) {
     if (!s_cameraOk) return;
     // Core 0, below the mic front-end (priority 5). Core 1 carries wake word +
     // commands, drawing and sound; at the lowest priority there, detection
     // was starved and only caught a face if you held still.
-    xTaskCreatePinnedToCore(faceTask, "face", 12 * 1024, nullptr, 3, nullptr, 0);
+    xTaskCreatePinnedToCore(faceTask, "face", 12 * 1024, accurate ? (void*)1 : nullptr, 3, nullptr, 0);
 }
 
 void faceTrackingSetInterval(uint32_t ms) { s_intervalMs.store(ms); }

@@ -9,7 +9,9 @@
 bool cameraBegin();
 
 // Start the face-detection task (loads the model; takes a moment).
-void faceTrackingStart();
+// `accurate`: ESPDet-Pico (finds faces far more reliably, ~3x slower per
+// frame) instead of the fast two-stage MSR+MNP model.
+void faceTrackingStart(bool accurate = true);
 
 // How often to look: 0 pauses detection (e.g. while asleep).
 void faceTrackingSetInterval(uint32_t ms);

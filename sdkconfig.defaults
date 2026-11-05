@@ -33,6 +33,10 @@ CONFIG_SR_WN_WN10_EN_HEYBUDDY=y
 CONFIG_SR_MN_CN_NONE=y
 CONFIG_SR_MN_EN_MULTINET7_QUANT=y
 
+# Face detection models: ESPDet-Pico (accurate, default) and MSR+MNP (fast)
+CONFIG_FLASH_HUMAN_FACE_DETECT_MSRMNP_S8_V1=y
+CONFIG_FLASH_ESPDET_PICO_224_224_FACE=y
+
 # Camera driver task on core 1; core 0 is busy with speech processing
 CONFIG_CAMERA_CORE1=y
 

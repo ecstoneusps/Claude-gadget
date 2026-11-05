@@ -356,7 +356,7 @@ extern "C" void app_main(void) {
     // Speech runs on core 0; drawing and input get core 1.
     xTaskCreatePinnedToCore(uiTask, "ui", 8192, nullptr, 4, nullptr, 1);
     if (cameraOk && config.cameraPreview) cameraEnablePreview();
-    if (cameraOk && (config.faceTracking || config.cameraPreview)) faceTrackingStart();
+    if (cameraOk && (config.faceTracking || config.cameraPreview)) faceTrackingStart(config.accurateFaceModel);
     if (micOk) xTaskCreatePinnedToCore(voiceInitTask, "sr_init", 8192, nullptr, 3, nullptr, 0);
     ESP_LOGI(TAG, "desk companion started");
 }

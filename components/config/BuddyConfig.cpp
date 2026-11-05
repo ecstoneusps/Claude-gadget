@@ -126,6 +126,11 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
             if (!parseBool(val, cfg.faceTracking)) bad("must be on or off");
         } else if (key == "camera_mirrored") {
             if (!parseBool(val, cfg.cameraMirrored)) bad("must be on or off");
+        } else if (key == "face_model") {
+            const std::string v = lower(val);
+            if (v == "accurate") cfg.accurateFaceModel = true;
+            else if (v == "fast") cfg.accurateFaceModel = false;
+            else bad("must be accurate or fast");
         } else if (key == "camera_preview") {
             if (!parseBool(val, cfg.cameraPreview)) bad("must be on or off");
         } else if (key == "face_gaze") {
@@ -228,6 +233,9 @@ std::string defaultConfigText() {
     onoff("face_tracking", d.faceTracking, "eyes follow your face");
     onoff("camera_mirrored", d.cameraMirrored, "flip (on/off) if the eyes look away from you instead of at you");
     flt("face_gaze", d.faceGaze, "how far the eyes turn toward you, 0-3");
+    snprintf(buf, sizeof buf, "%-28s = %-6s # %s", "face_model", d.accurateFaceModel ? "accurate" : "fast",
+             "accurate finds you far more often; fast checks more times a second");
+    add(buf);
     onoff("camera_preview", d.cameraPreview, "show what the camera sees (green box = face found) instead of the face");
     add("");
     add("# --- Proximity sensor (above the screen) ---");
