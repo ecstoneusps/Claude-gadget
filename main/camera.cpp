@@ -43,9 +43,11 @@ static camera_config_t makeConfig() {
     c.pixel_format = PIXFORMAT_RGB565;
     c.frame_size = FRAMESIZE_QVGA;  // 320x240 is plenty for finding a face
     c.jpeg_quality = 0;
-    c.fb_count = 2;
+    c.fb_count = 1;
     c.fb_location = CAMERA_FB_IN_PSRAM;
-    c.grab_mode = CAMERA_GRAB_LATEST;  // always analyze the newest frame
+    // Capture only when face detection asks for a frame (5 a second), not
+    // continuously: the driver's frame copying is real CPU work.
+    c.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
     c.sccb_i2c_port = 1;
     return c;
 }

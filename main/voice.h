@@ -28,4 +28,5 @@ bool voiceStart(QueueHandle_t events,
 // Latest audio level in dBFS and whether someone seems to be talking.
 // Safe to call from any task.
 float voiceLevelDb();
+const char* voiceFrontEnd();  // "MM" (both mics), "M" (one) or "off"
 bool voiceSpeech();

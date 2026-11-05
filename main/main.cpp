@@ -80,6 +80,7 @@ static Face face;
 static Companion buddy(face);
 static QueueHandle_t voiceEvents;
 static std::atomic<bool> voiceOk{false};
+static bool audioOk = false, cameraOkFlag = false, proxOkFlag = false;
 
 static void handleTouch(uint32_t now) {
     if (M5.Touch.getCount() == 0) return;
@@ -246,6 +247,8 @@ static void drawCameraPreview() {
 
 static void uiTask(void*) {
     const bool proxOk = config.proximity && proximityBegin();
+    proxOkFlag = proxOk;
+    uint32_t lastStatus = 0;
     uint32_t lastFrame = nowMs(), lastBattery = 0, lastImu = 0;
     bool dimmed = false;
     while (true) {
@@ -259,6 +262,20 @@ static void uiTask(void*) {
         handleVoice(now);
         handleProximity(now, proxOk);
         handleFace(now);
+
+        // One-line health summary every 30 s, so a log opened at any time
+        // shows what started (the USB monitor disconnects on every reset).
+        if (lastStatus == 0 || now - lastStatus > 30000) {
+            lastStatus = now;
+            ESP_LOGI(TAG, "status: audio %s, voice %s (%s), sd %s, camera %s, proximity %s, "
+                          "battery %d%%%s, free PSRAM %u KB, free internal %u KB",
+                     audioOk ? "ok" : "FAILED", voiceOk.load() ? "ready" : "not ready", voiceFrontEnd(),
+                     sdcardMounted() ? "ok" : "none", cameraOkFlag ? "ok" : "off/FAILED",
+                     proxOkFlag ? "ok" : "off/FAILED", (int)M5.Power.getBatteryLevel(),
+                     M5.Power.isCharging() ? " charging" : "",
+                     (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
+                     (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
+        }
 
         if (lastBattery == 0 || now - lastBattery > 10000) {
             lastBattery = now;
@@ -315,6 +332,8 @@ extern "C" void app_main(void) {
     sharedI2cBus();                       // before other tasks touch the I2C bus
     const bool cameraOk = cameraBegin();
     const bool micOk = audioBegin();
+    audioOk = micOk;
+    cameraOkFlag = cameraOk;
     soundInit();
     soundSetVolume(config.volume);
 

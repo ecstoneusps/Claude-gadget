@@ -30,5 +30,8 @@ CONFIG_SR_WN_WN10_EN_HEYBUDDY=y
 CONFIG_SR_MN_CN_NONE=y
 CONFIG_SR_MN_EN_MULTINET7_QUANT=y
 
+# Camera driver task on core 1; core 0 is busy with speech processing
+CONFIG_CAMERA_CORE1=y
+
 # FAT long file names on the SD card (settings.txt, and later sounds/photos)
 CONFIG_FATFS_LFN_HEAP=y

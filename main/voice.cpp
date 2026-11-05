@@ -35,6 +35,9 @@ static esp_mn_iface_t* s_mn = nullptr;
 static model_iface_data_t* s_mnData = nullptr;
 static QueueHandle_t s_events = nullptr;
 
+static const char* s_format = "off";  // front-end input format, for the status line
+const char* voiceFrontEnd() { return s_format; }
+
 static std::atomic<float> s_levelDb{-90.0f};
 static std::atomic<bool> s_speech{false};
 
@@ -132,6 +135,7 @@ static bool createAfe(srmodel_list_t* models, const char* format) {
     s_afeData = s_afe ? s_afe->create_from_config(cfg) : nullptr;
     afe_config_free(cfg);
     if (!s_afeData) return false;
+    s_format = format;
     ESP_LOGI(TAG, "audio front-end (%s, %d mic channel%s):", format,
              s_afe->get_feed_channel_num(s_afeData), format[1] ? "s" : "");
     s_afe->print_pipeline(s_afeData);  // e.g. |SE(BSS)| -> |VAD| -> |WakeNet|
@@ -188,7 +192,11 @@ bool voiceStart(QueueHandle_t events,
     s_mn->print_active_speech_commands(s_mnData);
     ESP_LOGI(TAG, "MultiNet %s ready, %d phrases", mnName, kCommandPhraseCount + (int)extraPhrases.size());
 
+    // Split across both cores: the front-end (noise separation) runs inside
+    // feed() on core 0; wake word + command recognition run inside fetch() on
+    // core 1, above the UI's priority so speech never waits for drawing.
+    // (All on core 0 starved it: the idle-task watchdog fired every 5 s.)
     xTaskCreatePinnedToCore(feedTask, "sr_feed", 4096, nullptr, 5, nullptr, 0);
-    xTaskCreatePinnedToCore(detectTask, "sr_detect", 8192, nullptr, 5, nullptr, 0);
+    xTaskCreatePinnedToCore(detectTask, "sr_detect", 8192, nullptr, 5, nullptr, 1);
     return true;
 }
