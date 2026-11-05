@@ -237,7 +237,7 @@ works without a card.
 1. ~~Face engine and desktop preview~~
 2. ~~Touch, motion and sound reactions~~
 3. ~~Offline wake word and voice commands~~
-4. Test on hardware and tune thresholds
+4. ~~Test on hardware and tune thresholds~~
 5. ~~Use both microphones for better pickup across a room~~
 6. ~~Sound effects through the speaker (chirps, giggles, yawns)~~
 7. ~~Proximity sensor: wake up when someone sits down~~

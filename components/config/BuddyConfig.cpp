@@ -226,7 +226,7 @@ std::string defaultConfigText() {
     add("");
     add("# --- Camera ---");
     onoff("face_tracking", d.faceTracking, "eyes follow your face");
-    onoff("camera_mirrored", d.cameraMirrored, "turn on if the eyes look away from you instead of at you");
+    onoff("camera_mirrored", d.cameraMirrored, "flip (on/off) if the eyes look away from you instead of at you");
     flt("face_gaze", d.faceGaze, "how far the eyes turn toward you, 0-3");
     onoff("camera_preview", d.cameraPreview, "show what the camera sees (green box = face found) instead of the face");
     add("");
