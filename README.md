@@ -25,8 +25,8 @@ about 6 seconds to say one of these:
 | tell me a joke / make me laugh | Laughs |
 | look left / look right | Looks that way |
 | be happy / be sad / be angry / be surprised | Shows that expression |
-| be cool / be silly (or "make a silly face") | Heavy-lidded smirk / lopsided eyes with its tongue out |
-| wink at me / give me a wink | Winks |
+| be cool / make a silly face (or "act goofy") | Heavy-lidded smirk / lopsided eyes with its tongue out |
+| wink at me / give me a wink / do a wink | Winks |
 | good night / go to sleep | Yawns, then sleeps and dims until "Hey Buddy", a tap, or a shake |
 | wake up | Startled awake |
 | be quiet / quiet please | Turns its sounds off (remembered after a restart) |

@@ -31,9 +31,11 @@ const CommandPhrase kCommandPhrases[] = {
     {VoiceCommand::SoundOn, "you can talk"},
     {VoiceCommand::Wink, "wink at me"},
     {VoiceCommand::Wink, "give me a wink"},
+    {VoiceCommand::Wink, "do a wink"},
     {VoiceCommand::BeCool, "be cool"},
-    {VoiceCommand::BeSilly, "be silly"},
+    // Not "be silly": on the device it was heard as "be sad".
     {VoiceCommand::BeSilly, "make a silly face"},
+    {VoiceCommand::BeSilly, "act goofy"},
 };
 const int kCommandPhraseCount = sizeof(kCommandPhrases) / sizeof(kCommandPhrases[0]);
 
