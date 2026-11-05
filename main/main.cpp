@@ -228,16 +228,25 @@ static void loadSettings() {
              config.faceTracking ? "on" : "off", config.proximity ? "on" : "off");
 }
 
-// Diagnostic view: the camera image with a box around the face it found.
+// Diagnostic view: the camera image (pixel-doubled to fill the screen) with
+// a box around the face it found.
 static void drawCameraPreview() {
     static uint32_t seq = 0;
-    static uint16_t* frame = (uint16_t*)heap_caps_malloc(320 * 240 * 2, MALLOC_CAP_SPIRAM);
-    if (!frame || !cameraCopyPreview(frame, &seq)) return;
-    canvas.pushImage(0, 0, 320, 240, frame);  // uint16_t* = big-endian RGB565 in M5GFX
+    static uint16_t* frame = (uint16_t*)heap_caps_malloc(kCamW * kCamH * 2, MALLOC_CAP_SPIRAM);
+    static uint16_t* big = (uint16_t*)heap_caps_malloc(kCamW * kCamH * 8, MALLOC_CAP_SPIRAM);
+    if (!frame || !big || !cameraCopyPreview(frame, &seq)) return;
+    for (int y = 0; y < kCamH; ++y) {
+        const uint16_t* src = frame + y * kCamW;
+        uint16_t* d0 = big + (2 * y) * (2 * kCamW);
+        uint16_t* d1 = d0 + 2 * kCamW;
+        for (int x = 0; x < kCamW; ++x) d0[2 * x] = d0[2 * x + 1] = d1[2 * x] = d1[2 * x + 1] = src[x];
+    }
+    canvas.pushImage(0, 0, 2 * kCamW, 2 * kCamH, big);  // uint16_t* = big-endian RGB565 in M5GFX
     const FaceSighting f = faceTrackingLatest();
     if (f.found) {
-        canvas.drawRect(f.box[0], f.box[1], f.box[2] - f.box[0], f.box[3] - f.box[1], TFT_GREEN);
-        canvas.drawRect(f.box[0] + 1, f.box[1] + 1, f.box[2] - f.box[0] - 2, f.box[3] - f.box[1] - 2, TFT_GREEN);
+        const int x = 2 * f.box[0], y = 2 * f.box[1], w = 2 * (f.box[2] - f.box[0]), h = 2 * (f.box[3] - f.box[1]);
+        canvas.drawRect(x, y, w, h, TFT_GREEN);
+        canvas.drawRect(x + 1, y + 1, w - 2, h - 2, TFT_GREEN);
     }
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
     canvas.setCursor(4, 4);
@@ -248,7 +257,7 @@ static void drawCameraPreview() {
 static void uiTask(void*) {
     const bool proxOk = config.proximity && proximityBegin();
     proxOkFlag = proxOk;
-    uint32_t lastStatus = 0;
+    uint32_t lastStatus = 0, frames = 0;
     uint32_t lastFrame = nowMs(), lastBattery = 0, lastImu = 0;
     bool dimmed = false;
     while (true) {
@@ -266,20 +275,26 @@ static void uiTask(void*) {
         // One-line health summary every 30 s, so a log opened at any time
         // shows what started (the USB monitor disconnects on every reset).
         if (lastStatus == 0 || now - lastStatus > 30000) {
-            lastStatus = now;
-            ESP_LOGI(TAG, "status: audio %s, voice %s (%s), sd %s, camera %s, proximity %s, "
-                          "battery %d%%%s, free PSRAM %u KB, free internal %u KB",
+            ESP_LOGI(TAG, "status: %d fps, audio %s, voice %s (%s), sd %s, camera %s, proximity %s, "
+                          "battery %d%%%s, usb %d mV, free PSRAM %u KB, free internal %u KB",
+                     (int)(frames * 1000 / (now - lastStatus + 1)),
                      audioOk ? "ok" : "FAILED", voiceOk.load() ? "ready" : "not ready", voiceFrontEnd(),
                      sdcardMounted() ? "ok" : "none", cameraOkFlag ? "ok" : "off/FAILED",
                      proxOkFlag ? "ok" : "off/FAILED", (int)M5.Power.getBatteryLevel(),
-                     M5.Power.isCharging() ? " charging" : "",
+                     M5.Power.isCharging() ? " charging" : "", (int)M5.Power.getVBUSVoltage(),
                      (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
                      (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
+            lastStatus = now;
+            frames = 0;
         }
 
         if (lastBattery == 0 || now - lastBattery > 10000) {
             lastBattery = now;
-            buddy.setLowBattery(!M5.Power.isCharging() && M5.Power.getBatteryLevel() < 10);
+            // Low battery = actually running on a battery that's nearly empty.
+            // On USB power, or with no battery fitted (it reads 0%), it isn't.
+            const int level = (int)M5.Power.getBatteryLevel();
+            const bool onUsb = M5.Power.getVBUSVoltage() > 4000;
+            buddy.setLowBattery(!onUsb && level > 0 && level < 10);
         }
 
         buddy.update(now);
@@ -297,6 +312,7 @@ static void uiTask(void*) {
         if (now - lastFrame >= kFrameMs) {
             face.update(now - lastFrame);
             lastFrame = now;
+            ++frames;
             if (config.cameraPreview) {
                 drawCameraPreview();
             } else {

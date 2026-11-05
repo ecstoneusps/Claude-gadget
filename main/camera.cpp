@@ -41,7 +41,7 @@ static camera_config_t makeConfig() {
     c.ledc_timer = LEDC_TIMER_0;
     c.ledc_channel = LEDC_CHANNEL_0;
     c.pixel_format = PIXFORMAT_RGB565;
-    c.frame_size = FRAMESIZE_QVGA;  // 320x240 is plenty for finding a face
+    c.frame_size = FRAMESIZE_QQVGA;  // 160x120, full field of view (subsample mode)
     c.jpeg_quality = 0;
     c.fb_count = 2;
     c.fb_location = CAMERA_FB_IN_PSRAM;
@@ -65,7 +65,7 @@ static SemaphoreHandle_t s_previewLock = nullptr;
 
 void cameraEnablePreview() {
     if (s_preview) return;
-    s_preview = (uint16_t*)heap_caps_malloc(320 * 240 * 2, MALLOC_CAP_SPIRAM);
+    s_preview = (uint16_t*)heap_caps_malloc(kCamW * kCamH * 2, MALLOC_CAP_SPIRAM);
     s_previewLock = xSemaphoreCreateMutex();
 }
 
@@ -74,7 +74,7 @@ bool cameraCopyPreview(uint16_t* dst, uint32_t* seq) {
     bool fresh = false;
     if (xSemaphoreTake(s_previewLock, pdMS_TO_TICKS(5)) == pdTRUE) {
         if (s_previewSeq != *seq) {
-            memcpy(dst, s_preview, 320 * 240 * 2);
+            memcpy(dst, s_preview, kCamW * kCamH * 2);
             *seq = s_previewSeq;
             fresh = true;
         }
@@ -136,9 +136,9 @@ static void faceTask(void*) {
             f.size = (float)h / fb->height;
             for (int k = 0; k < 4; ++k) f.box[k] = r.box[k];
         }
-        if (s_preview && fb->len >= 320 * 240 * 2 &&
+        if (s_preview && fb->len >= (size_t)kCamW * kCamH * 2 &&
             xSemaphoreTake(s_previewLock, pdMS_TO_TICKS(20)) == pdTRUE) {
-            memcpy(s_preview, fb->buf, 320 * 240 * 2);
+            memcpy(s_preview, fb->buf, kCamW * kCamH * 2);
             ++s_previewSeq;
             xSemaphoreGive(s_previewLock);
         }

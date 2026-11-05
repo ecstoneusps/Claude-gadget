@@ -25,8 +25,12 @@ struct FaceSighting {
 // Latest result. Safe to call from any task.
 FaceSighting faceTrackingLatest();
 
+// Camera frame size. The detection model works at 160x120 anyway, and a
+// smaller frame means a quarter of the memory traffic.
+constexpr int kCamW = 160, kCamH = 120;
+
 // Camera preview (a diagnostic, `camera_preview = on` in settings.txt): keeps
-// a copy of the latest 320x240 frame. Copies it into `dst` (big-endian RGB565,
-// as the camera delivers it) if a newer one arrived since the last call.
+// a copy of the latest kCamW x kCamH frame. Copies it into `dst` (big-endian
+// RGB565, as the camera delivers it) if a newer one arrived since the last call.
 void cameraEnablePreview();
 bool cameraCopyPreview(uint16_t* dst, uint32_t* seq);
