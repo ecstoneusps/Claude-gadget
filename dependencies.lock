@@ -128,6 +128,16 @@ dependencies:
     - esp32c61
     - esp32h4
     version: 1.0.2
+  espressif/esp_websocket_client:
+    component_hash: dc00233af846f3a744ada283a300e0d586040aadc3ee67361645ecdce4523672
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.8.0
   espressif/human_face_detect:
     component_hash: 78e59910d978521b75402062adb6496deb8f03b45581c39c748fa15000bf3e28
     dependencies:
@@ -165,9 +175,10 @@ direct_dependencies:
 - espressif/esp-sr
 - espressif/esp32-camera
 - espressif/esp_codec_dev
+- espressif/esp_websocket_client
 - espressif/human_face_detect
 - idf
 - m5stack/m5unified
-manifest_hash: bdd0ba0097ee04eaa52d6a5a4332088cf662be499990e9e94986d3588aa60989
+manifest_hash: 83b35c11fa9ff72c1d789f167ed83c69f0e17c5b23b24bc53889facce795c392
 target: esp32s3
 version: 2.0.0
