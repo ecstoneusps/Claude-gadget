@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <map>
+
 namespace {
 
 std::string trim(const std::string& s) {
@@ -84,6 +86,7 @@ bool commandFromKey(const std::string& key, VoiceCommand& out) {
 
 void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::string>& warnings) {
     int lineNo = 0;
+    std::map<std::string, int> seen;  // setting -> line it was first given on
     size_t pos = 0;
     while (pos <= text.size()) {
         size_t nl = text.find('\n', pos);
@@ -120,6 +123,23 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
         } else {
             const size_t h = val.find('#');
             if (h != std::string::npos) val = trim(val.substr(0, h));
+        }
+
+        // The same setting twice (say.* lines add up, so they're fine). An
+        // empty copy doesn't erase a filled-in one: that's usually the
+        // template's own line left below the one you added.
+        if (key.rfind("say.", 0) != 0) {
+            auto it = seen.find(key);
+            if (it != seen.end()) {
+                const std::string first = std::to_string(it->second);
+                if (val.empty()) {
+                    warnings.push_back(lineWarning(lineNo, key + " is empty here; using line " + first));
+                    continue;
+                }
+                warnings.push_back(lineWarning(lineNo, key + " was already set on line " + first + "; using this one"));
+            } else if (!val.empty()) {
+                seen[key] = lineNo;
+            }
         }
 
         if (key == "volume") {

@@ -176,6 +176,25 @@ static void test_upgrade_old_file() {
     CHECK(cfg.volume == 40 && cfg.brightness == 50 && cfg.haPipeline == "Buddy");
 }
 
+static void test_duplicate_settings() {
+    // You fill in a line, but the template's empty line is still further down.
+    BuddyConfig cfg;
+    std::vector<std::string> w;
+    parseConfig("wifi_name = airport\n"
+                "volume = 40\n"
+                "wifi_name =        # your Wi-Fi network\n"
+                "volume = 50\n"
+                "say.hello = howdy\n"
+                "say.hello = yo buddy\n",
+                cfg, w);
+    CHECK(cfg.wifiName == "airport");  // the empty copy doesn't erase it
+    CHECK(cfg.volume == 50);            // a second real value wins
+    CHECK(cfg.extraPhrases.size() == 2);
+    CHECK(w.size() == 2);
+    CHECK(w.size() == 2 && w[0].find("line 3") == 0 && w[0].find("using line 1") != std::string::npos);
+    CHECK(w.size() == 2 && w[1].find("line 4") == 0 && w[1].find("already set on line 2") != std::string::npos);
+}
+
 int main(int argc, char** argv) {
     if (argc > 1 && strcmp(argv[1], "--write-settings") == 0) g_writeSettings = argv[1];
     struct { const char* name; void (*fn)(); } tests[] = {
@@ -187,6 +206,7 @@ int main(int argc, char** argv) {
         {"AI settings", test_ai_settings},
         {"AI settings mistakes", test_ai_settings_mistakes},
         {"older settings file is upgraded", test_upgrade_old_file},
+        {"duplicate settings", test_duplicate_settings},
         {"repo copy of settings.txt matches firmware", test_repo_copy_matches_firmware_default},
     };
     for (auto& t : tests) {

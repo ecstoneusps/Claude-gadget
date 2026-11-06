@@ -210,7 +210,12 @@ static void faceTask(void* arg) {
         const bool justLost = !f.found && lastHit && now - lastHit < pdMS_TO_TICKS(2000);
         const TickType_t elapsed = now - start;
         const TickType_t wait = pdMS_TO_TICKS(justLost ? 60 : interval);
-        vTaskDelay(elapsed < wait ? wait - elapsed : 1);
+        // Always rest at least half as long as the detection took. The
+        // accurate model takes ~0.5 s, and running it back to back left core 0
+        // no idle time at all (task watchdog warnings).
+        TickType_t rest = elapsed < wait ? wait - elapsed : 1;
+        if (rest < elapsed / 2) rest = elapsed / 2;
+        vTaskDelay(rest);
     }
 }
 

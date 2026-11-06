@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "esp_event.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
@@ -55,6 +56,7 @@ static void onEvent(void*, esp_event_base_t base, int32_t id, void* data) {
 
 bool wifiStart(const std::string& ssid, const std::string& password) {
     if (ssid.empty()) return false;
+    ESP_LOGI(TAG, "starting (%u KB internal RAM free)", (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
     esp_err_t err = esp_netif_init();
     if (err == ESP_OK) err = esp_event_loop_create_default();
     if (err == ESP_ERR_INVALID_STATE) err = ESP_OK;  // already created
@@ -70,7 +72,10 @@ bool wifiStart(const std::string& ssid, const std::string& password) {
 
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     if ((err = esp_wifi_init(&init)) != ESP_OK) {
-        ESP_LOGE(TAG, "init failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "init failed: %s (%u KB internal RAM free, largest block %u KB)", esp_err_to_name(err),
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024));
+        s_status.store(err == ESP_ERR_NO_MEM ? "FAILED: out of memory" : "FAILED to start");
         return false;
     }
     esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, onEvent, nullptr);
@@ -88,6 +93,7 @@ bool wifiStart(const std::string& ssid, const std::string& password) {
     esp_wifi_set_config(WIFI_IF_STA, &cfg);
     if ((err = esp_wifi_start()) != ESP_OK) {
         ESP_LOGE(TAG, "start failed: %s", esp_err_to_name(err));
+        s_status.store(err == ESP_ERR_NO_MEM ? "FAILED: out of memory" : "FAILED to start");
         return false;
     }
     // Power saving adds up to a few hundred ms of delay per packet; answers

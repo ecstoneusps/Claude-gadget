@@ -529,7 +529,7 @@ static void startWebsocket() {
     esp_websocket_client_config_t wc = {};
     wc.uri = uri.c_str();
     wc.buffer_size = 4096;
-    wc.task_stack = 6144;
+    wc.task_stack = 5120;
     wc.task_prio = 4;
     wc.task_core_id_set = true;
     wc.task_core_id = 1;
@@ -588,7 +588,12 @@ bool assistantStart(const AssistantConfig& cfg, QueueHandle_t events) {
     s_inbox = xQueueCreate(24, sizeof(std::string*));
     s_audio = xStreamBufferCreateWithCaps(kSampleRate * 2 * 4, 1, MALLOC_CAP_SPIRAM);  // 4 s
     if (!s_inbox || !s_audio) return false;
-    xTaskCreatePinnedToCore(assistantTask, "assistant", 8192, nullptr, 3, &s_task, 1);
+    // Stack in PSRAM: internal RAM is scarce, and this task never touches flash.
+    if (xTaskCreatePinnedToCoreWithCaps(assistantTask, "assistant", 8192, nullptr, 3, &s_task, 1,
+                                        MALLOC_CAP_SPIRAM) != pdPASS) {
+        ESP_LOGE(TAG, "out of memory starting the assistant");
+        return false;
+    }
     return true;
 }
 
