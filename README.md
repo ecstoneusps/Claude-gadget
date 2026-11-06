@@ -9,10 +9,41 @@ and understands spoken commands offline after you say **"Hey Buddy"**.
 
 ![expressions](preview/face_sheet.png)
 
+## Talking with it (AI conversation)
+
+With Wi-Fi and a Home Assistant server set up, you can have a real
+conversation: say **"Hey Buddy"**, then ask anything ("what's a good name for
+a cat?", "tell me about Saturn"). It looks thoughtful while it works out an
+answer, then replies **out loud** with its mouth moving along and its face
+showing the mood of the answer. After it answers it keeps listening for about
+5 seconds, so you can carry on talking without saying "Hey Buddy" again.
+
+How it works: what you say goes to Home Assistant's voice assistant over its
+websocket API. Whisper turns it into text, and the conversation agent (a
+language model on your own PC, through Ollama) writes the answer, starting with
+an emotion tag such as `[laughing]` that picks the face. Piper turns the answer
+into speech. All of it runs on your own machines. The setup guide covers the
+Home Assistant side step by step.
+
+- The face and mood commands below (look left, wink at me, be cool, good night,
+  be quiet...) still run on the buddy itself when you say just that. Everything
+  else, including "tell me a joke" and "how are you", goes to the AI.
+- It remembers the conversation for 5 minutes, so "what about Jupiter?" works
+  after a question about Saturn.
+- Without Wi-Fi, or if Home Assistant can't be reached, it falls back to the
+  built-in commands.
+- "Be quiet" turns off its sound effects, but it still speaks its answers.
+
+Fill in `wifi_name`, `wifi_password`, `ha_url` and `ha_token` in `settings.txt`
+(see [Settings](#settings-microsd-card)). Keep the card private: the token works
+like a password for the Home Assistant user it belongs to.
+
 ## Voice commands
 
 Say **"Hey Buddy"**. The face switches to its listening look, and you then have
-about 6 seconds to say one of these:
+about 6 seconds to say one of these. With the AI connected, these work the same
+way for the face and mood commands; the chatty ones (hello, how are you, jokes,
+compliments) are answered by the AI instead:
 
 | Say | It does |
 |---|---|
@@ -37,7 +68,8 @@ If it doesn't catch a command, it looks confused for a moment.
 All recognition runs on the device with Espressif's
 [ESP-SR](https://github.com/espressif/esp-sr) models: the WakeNet "Hey Buddy"
 wake word and the MultiNet7 English command recognizer. Nothing is sent to the
-internet. To change the phrases, edit `kCommandPhrases` in
+internet (with the AI set up, what you say after "Hey Buddy" goes to your own
+Home Assistant server). To change the phrases, edit `kCommandPhrases` in
 `components/companion/Companion.cpp`. Phrases must be lowercase letters and spaces only.
 
 By default it listens with **one microphone**. `two_microphones = on` in
@@ -129,17 +161,20 @@ main/proximity.cpp     LTR-553 proximity sensor driver (presence logic is in com
 main/camera.cpp        Camera setup and face detection task
 main/settings.cpp      Settings kept across restarts in flash (NVS): currently mute
 main/sdcard.cpp        microSD card (shares the display's SPI bus)
+main/wifi.cpp          Wi-Fi station (reconnects on its own)
+main/assistant.cpp     Home Assistant voice assistant client: streams speech, gets the answer, plays it
+components/assist/     Reply parsing (emotion tags, text cleanup), command matching, WAV decoding (portable C++)
 components/config/     settings.txt parser and the default file (portable C++)
 sdcard/                Files for the SD card: settings.txt as written to a fresh card
 components/espdl_all_ops/  Build helper: makes esp-dl compile every neural-network op the face model may need
 tests/                 Native unit tests for the brain (run on a PC)
 tools/preview/         Renders the face to PNG/GIF on a PC
-partitions.csv         Flash layout (4 MB app + 8 MB speech models; ~2.9 MB and ~3.1 MB used)
+partitions.csv         Flash layout (7 MB app + 8 MB speech models; ~4.1 MB and ~3.1 MB used)
 sdkconfig.defaults     Board, PSRAM and speech model settings
 ```
 
-`components/face`, `components/companion`, `components/sfx` and `components/config`
-contain no ESP32 code, so they build and run on a PC for testing and previews.
+`components/face`, `components/companion`, `components/sfx`, `components/config`
+and `components/assist` contain no ESP32 code, so they build and run on a PC for testing and previews.
 
 ## Build and flash
 
@@ -212,6 +247,15 @@ and restart the buddy.
 | `camera_preview` | Show what the camera sees, with a green box around a detected face (for troubleshooting) |
 | `proximity`, `proximity_sensitivity` | Proximity sensor on/off; lower sensitivity numbers notice you from further away |
 | `flip_tilt_x`, `flip_tilt_y` | Fix tilt reactions that go the wrong way |
+| `wifi_name`, `wifi_password` | Your Wi-Fi (2.4 GHz). Put the password in "quotes" if it contains a `#` |
+| `ha_url` | Home Assistant's address with its IP and port, e.g. `http://192.168.1.20:8123` (`.local` names don't work) |
+| `ha_token` | A long-lived access token for the Home Assistant user the buddy logs in as |
+| `ha_pipeline` | The voice assistant to use, by its name in Home Assistant (default `Buddy`) |
+| `conversation` | `off` uses only the built-in commands, even with the above filled in |
+| `follow_up` | `off` makes it go back to waiting for "Hey Buddy" after each answer |
+
+A `settings.txt` from an older version gets the new Wi-Fi and Home Assistant
+lines added to the end automatically on the next start.
 
 Mistakes, such as a typo or an out-of-range number, are listed in the serial log,
 and that line is ignored. Without a card, it uses the built-in defaults. The
@@ -247,4 +291,5 @@ works without a card.
 9. ~~Remember the mute setting across restarts~~
 10. ~~Settings file on the SD card~~
 11. Recognize you (face recognition, enrolled face stored on the card)
-12. Cloud conversation: speech-to-text → LLM → emotion tag drives the face, with spoken replies
+12. ~~AI conversation: speech-to-text → LLM → emotion tag drives the face, with spoken replies~~
+13. Home Assistant sensors and controls over MQTT (desk occupied, light level, battery, mood)

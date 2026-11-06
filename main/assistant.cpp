@@ -1,0 +1,622 @@
+#include "assistant.h"
+
+#include <atomic>
+#include <string.h>
+
+#include "cJSON.h"
+#include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
+#include "esp_http_client.h"
+#include "esp_log.h"
+#include "esp_timer.h"
+#include "esp_websocket_client.h"
+#include "freertos/idf_additions.h"
+#include "freertos/stream_buffer.h"
+#include "freertos/task.h"
+
+#include "AssistText.h"
+#include "Wav.h"
+#include "audio_io.h"
+#include "sound.h"
+#include "voice.h"
+#include "wifi.h"
+
+static const char* TAG = "assistant";
+
+static constexpr int kSampleRate = 16000;
+static constexpr uint32_t kRunStartMs = 8000;      // Home Assistant to accept the audio
+static constexpr uint32_t kSttMs = 20000;          // speech-to-text after you stop talking
+static constexpr uint32_t kIntentMs = 90000;       // the AI's answer (a cold model can take a while)
+static constexpr uint32_t kConversationMs = 300000;  // keep the same conversation (memory) this long
+static constexpr size_t kMaxReplyBytes = 4 * 1024 * 1024;  // ~2 minutes of 16 kHz speech
+
+static AssistantConfig s_cfg;
+static QueueHandle_t s_events = nullptr;
+static QueueHandle_t s_inbox = nullptr;  // std::string* JSON messages from the websocket task
+static StreamBufferHandle_t s_audio = nullptr;
+static esp_websocket_client_handle_t s_ws = nullptr;
+static TaskHandle_t s_task = nullptr;
+
+static std::atomic<bool> s_ready{false};       // logged in and the voice assistant is known
+static std::atomic<bool> s_turnActive{false};
+static std::atomic<bool> s_turnPending{false};
+static std::atomic<bool> s_followUpTurn{false};
+static std::atomic<bool> s_accepting{false};   // voice.cpp may push audio
+static std::atomic<bool> s_audioEnded{false};
+static std::atomic<bool> s_heardSpeech{false};
+static std::atomic<bool> s_sttDone{false};
+static std::atomic<const char*> s_status{"off"};
+
+// Websocket task only.
+static std::string s_rx;
+
+// Assistant task only.
+static int s_nextId = 1;
+static int s_listId = 0;
+static std::string s_pipelineId, s_ttsEngine, s_ttsLanguage, s_ttsVoice;
+static std::string s_conversationId;
+static uint32_t s_conversationUntil = 0;
+static bool s_tokenRejected = false;
+
+enum class Stage { Idle, WaitRunStart, Streaming, WaitStt, WaitIntent };
+static Stage s_stage = Stage::Idle;
+static int s_runId = 0;
+static int s_handlerId = -1;
+static uint32_t s_deadline = 0;
+
+static uint32_t nowMs() { return (uint32_t)(esp_timer_get_time() / 1000); }
+
+// cJSON makes many small allocations; keep them out of the scarce internal RAM.
+static void* psramMalloc(size_t n) { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); }
+static void psramFree(void* p) { heap_caps_free(p); }
+
+static void post(AssistEvent::Type type, const char* text = "", const char* emotion = "", int command = 0) {
+    AssistEvent ev{};
+    ev.type = type;
+    ev.followUp = s_followUpTurn.load();
+    ev.command = command;
+    strncpy(ev.emotion, emotion, sizeof ev.emotion - 1);
+    strncpy(ev.text, text, sizeof ev.text - 1);
+    xQueueSend(s_events, &ev, pdMS_TO_TICKS(100));
+}
+
+static const char* jstr(const cJSON* obj, const char* key) {
+    const cJSON* v = cJSON_GetObjectItemCaseSensitive(obj, key);
+    return cJSON_IsString(v) ? v->valuestring : nullptr;
+}
+
+static bool sendJson(cJSON* msg) {
+    char* text = cJSON_PrintUnformatted(msg);
+    cJSON_Delete(msg);
+    if (!text) return false;
+    const int len = strlen(text);
+    const int sent = esp_websocket_client_is_connected(s_ws)
+                         ? esp_websocket_client_send_text(s_ws, text, len, pdMS_TO_TICKS(3000))
+                         : -1;
+    cJSON_free(text);
+    return sent == len;
+}
+
+// ---------------------------------------------------------------------------
+// Websocket task: collect each message (it may arrive in pieces) and hand it over.
+
+static void onWsEvent(void*, esp_event_base_t, int32_t id, void* data) {
+    const auto* d = (esp_websocket_event_data_t*)data;
+    switch (id) {
+        case WEBSOCKET_EVENT_CONNECTED:
+            ESP_LOGI(TAG, "connected to Home Assistant");
+            s_status.store("logging in");
+            break;
+        case WEBSOCKET_EVENT_DISCONNECTED:
+        case WEBSOCKET_EVENT_ERROR:
+            if (s_ready.exchange(false) || id == WEBSOCKET_EVENT_DISCONNECTED)
+                ESP_LOGW(TAG, "lost the connection to Home Assistant; reconnecting");
+            if (strcmp(s_status.load(), "token rejected") != 0) s_status.store("connecting");
+            {
+                std::string* none = nullptr;  // tells the assistant task to abort a turn in progress
+                xQueueSend(s_inbox, &none, 0);
+            }
+            break;
+        case WEBSOCKET_EVENT_DATA:
+            if (d->op_code != 0x1 && d->op_code != 0x0) break;  // text frames only
+            if (d->payload_offset == 0) s_rx.clear();
+            s_rx.append(d->data_ptr, d->data_len);
+            if (d->payload_offset + d->data_len >= d->payload_len) {
+                auto* msg = new std::string(std::move(s_rx));
+                s_rx.clear();
+                if (xQueueSend(s_inbox, &msg, pdMS_TO_TICKS(200)) != pdTRUE) {
+                    ESP_LOGW(TAG, "dropped a message (busy)");
+                    delete msg;
+                }
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Turn handling (assistant task).
+
+static void finishTurn() {
+    s_accepting.store(false);
+    s_stage = Stage::Idle;
+    s_runId = 0;
+    s_handlerId = -1;
+    xStreamBufferReset(s_audio);
+    s_turnPending.store(false);
+    s_turnActive.store(false);
+}
+
+// The turn ended without speech to play: let the wake word listen again.
+static void endTurnAndResume() {
+    finishTurn();
+    voiceResume();
+}
+
+static void failTurn(const char* what) {
+    ESP_LOGW(TAG, "%s", what);
+    post(AssistEvent::Error, what);
+    endTurnAndResume();
+}
+
+static void startSttRun() {
+    s_runId = s_nextId++;
+    cJSON* m = cJSON_CreateObject();
+    cJSON_AddNumberToObject(m, "id", s_runId);
+    cJSON_AddStringToObject(m, "type", "assist_pipeline/run");
+    cJSON_AddStringToObject(m, "start_stage", "stt");
+    cJSON_AddStringToObject(m, "end_stage", "stt");
+    cJSON* in = cJSON_AddObjectToObject(m, "input");
+    cJSON_AddNumberToObject(in, "sample_rate", kSampleRate);
+    if (!s_pipelineId.empty()) cJSON_AddStringToObject(m, "pipeline", s_pipelineId.c_str());
+    s_handlerId = -1;
+    s_stage = Stage::WaitRunStart;
+    s_deadline = nowMs() + kRunStartMs;
+    if (!sendJson(m)) failTurn("couldn't send to Home Assistant");
+}
+
+static void startIntentRun(const std::string& text) {
+    s_runId = s_nextId++;
+    cJSON* m = cJSON_CreateObject();
+    cJSON_AddNumberToObject(m, "id", s_runId);
+    cJSON_AddStringToObject(m, "type", "assist_pipeline/run");
+    cJSON_AddStringToObject(m, "start_stage", "intent");
+    cJSON_AddStringToObject(m, "end_stage", "intent");
+    cJSON* in = cJSON_AddObjectToObject(m, "input");
+    cJSON_AddStringToObject(in, "text", text.c_str());
+    if (!s_pipelineId.empty()) cJSON_AddStringToObject(m, "pipeline", s_pipelineId.c_str());
+    if (!s_conversationId.empty() && (int32_t)(s_conversationUntil - nowMs()) > 0)
+        cJSON_AddStringToObject(m, "conversation_id", s_conversationId.c_str());
+    s_stage = Stage::WaitIntent;
+    s_deadline = nowMs() + kIntentMs;
+    if (!sendJson(m)) failTurn("couldn't send to Home Assistant");
+}
+
+// Sends buffered microphone audio: one byte of handler ID, then 16-bit PCM.
+static void pumpAudio() {
+    static uint8_t* buf = (uint8_t*)heap_caps_malloc(1 + 2048, MALLOC_CAP_SPIRAM);
+    if (!buf) return;
+    buf[0] = (uint8_t)s_handlerId;
+    for (int i = 0; i < 8; ++i) {  // at most ~0.5 s per pass, so events keep flowing
+        const size_t n = xStreamBufferReceive(s_audio, buf + 1, 2048, 0);
+        if (n == 0) break;
+        esp_websocket_client_send_bin(s_ws, (const char*)buf, (int)n + 1, pdMS_TO_TICKS(2000));
+    }
+    const bool ended = s_audioEnded.load() || s_sttDone.load();
+    if (ended && xStreamBufferIsEmpty(s_audio)) {
+        esp_websocket_client_send_bin(s_ws, (const char*)buf, 1, pdMS_TO_TICKS(2000));  // end of audio
+        s_accepting.store(false);
+        if (!s_heardSpeech.load() && !s_sttDone.load()) {
+            // Nothing was said; voice.cpp already told the UI and went back to the wake word.
+            finishTurn();
+            return;
+        }
+        s_stage = Stage::WaitStt;
+        s_deadline = nowMs() + kSttMs;
+    }
+}
+
+// Downloads the reply as 16 kHz mono WAV and starts playing it. Returns false on failure.
+static bool speak(const std::string& text) {
+    if (s_ttsEngine.empty()) {
+        ESP_LOGW(TAG, "the voice assistant has no text-to-speech set up");
+        return false;
+    }
+    cJSON* req = cJSON_CreateObject();
+    cJSON_AddStringToObject(req, "engine_id", s_ttsEngine.c_str());
+    cJSON_AddStringToObject(req, "message", text.c_str());
+    if (!s_ttsLanguage.empty()) cJSON_AddStringToObject(req, "language", s_ttsLanguage.c_str());
+    cJSON* opt = cJSON_AddObjectToObject(req, "options");
+    if (!s_ttsVoice.empty()) cJSON_AddStringToObject(opt, "voice", s_ttsVoice.c_str());
+    cJSON_AddStringToObject(opt, "preferred_format", "wav");
+    cJSON_AddNumberToObject(opt, "preferred_sample_rate", kSampleRate);
+    cJSON_AddNumberToObject(opt, "preferred_sample_channels", 1);
+    cJSON_AddNumberToObject(opt, "preferred_sample_bytes", 2);
+    char* body = cJSON_PrintUnformatted(req);
+    cJSON_Delete(req);
+    if (!body) return false;
+
+    const std::string auth = "Bearer " + s_cfg.token;
+    std::string url = s_cfg.url + "/api/tts_get_url";
+    esp_http_client_config_t hc = {};
+    hc.url = url.c_str();
+    hc.method = HTTP_METHOD_POST;
+    hc.timeout_ms = 30000;
+    hc.buffer_size = 2048;
+    hc.crt_bundle_attach = esp_crt_bundle_attach;
+    esp_http_client_handle_t http = esp_http_client_init(&hc);
+    esp_http_client_set_header(http, "Authorization", auth.c_str());
+    esp_http_client_set_header(http, "Content-Type", "application/json");
+
+    std::string resp;
+    bool ok = false;
+    const int bodyLen = strlen(body);
+    if (esp_http_client_open(http, bodyLen) == ESP_OK &&
+        esp_http_client_write(http, body, bodyLen) == bodyLen) {
+        esp_http_client_fetch_headers(http);
+        char chunk[512];
+        int n;
+        while ((n = esp_http_client_read(http, chunk, sizeof chunk)) > 0 && resp.size() < 8192) resp.append(chunk, n);
+        const int status = esp_http_client_get_status_code(http);
+        ok = status == 200;
+        if (!ok) ESP_LOGW(TAG, "text-to-speech request failed: HTTP %d %.120s", status, resp.c_str());
+    } else {
+        ESP_LOGW(TAG, "couldn't reach %s", s_cfg.url.c_str());
+    }
+    cJSON_free(body);
+    esp_http_client_cleanup(http);
+    if (!ok) return false;
+
+    cJSON* j = cJSON_Parse(resp.c_str());
+    const char* path = j ? jstr(j, "path") : nullptr;
+    const char* full = j ? jstr(j, "url") : nullptr;
+    if (path) url = s_cfg.url + path;
+    else if (full) url = full;
+    else url.clear();
+    cJSON_Delete(j);
+    if (url.empty()) {
+        ESP_LOGW(TAG, "text-to-speech gave no audio address");
+        return false;
+    }
+
+    // Fetch the audio into PSRAM.
+    hc = {};
+    hc.url = url.c_str();
+    hc.timeout_ms = 30000;
+    hc.buffer_size = 4096;
+    hc.crt_bundle_attach = esp_crt_bundle_attach;
+    http = esp_http_client_init(&hc);
+    size_t cap = 256 * 1024, len = 0;
+    uint8_t* wav = (uint8_t*)heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
+    ok = wav && esp_http_client_open(http, 0) == ESP_OK;
+    if (ok) {
+        esp_http_client_fetch_headers(http);
+        while (true) {
+            if (len == cap) {
+                if (cap >= kMaxReplyBytes) break;  // very long: play what we have
+                uint8_t* bigger = (uint8_t*)heap_caps_realloc(wav, cap * 2, MALLOC_CAP_SPIRAM);
+                if (!bigger) break;
+                wav = bigger;
+                cap *= 2;
+            }
+            const int n = esp_http_client_read(http, (char*)wav + len, cap - len);
+            if (n <= 0) break;
+            len += n;
+        }
+        const int status = esp_http_client_get_status_code(http);
+        if (status != 200) {
+            ESP_LOGW(TAG, "speech download failed: HTTP %d", status);
+            ok = false;
+        }
+    }
+    esp_http_client_cleanup(http);
+
+    WavInfo info;
+    if (ok && !parseWav(wav, len, info)) {
+        ESP_LOGW(TAG, "speech isn't a 16-bit WAV (%u bytes, starts %02x %02x %02x %02x)", (unsigned)len,
+                 len > 0 ? wav[0] : 0, len > 1 ? wav[1] : 0, len > 2 ? wav[2] : 0, len > 3 ? wav[3] : 0);
+        ok = false;
+    }
+    if (!ok) {
+        heap_caps_free(wav);
+        return false;
+    }
+    const size_t samples = wavResampledLength(info, kSampleRate);
+    int16_t* pcm = (int16_t*)heap_caps_malloc(samples * 2 + 2, MALLOC_CAP_SPIRAM);
+    if (!pcm) {
+        heap_caps_free(wav);
+        return false;
+    }
+    const size_t n = wavToMono(wav, info, kSampleRate, pcm, samples);
+    heap_caps_free(wav);
+    ESP_LOGI(TAG, "speaking %.1f s (%d Hz, %d ch from Home Assistant)", n / (float)kSampleRate, info.sampleRate,
+             info.channels);
+    soundSpeak(pcm, n);
+    return true;
+}
+
+// You said something: run it as a built-in command, or ask the AI.
+static void handleHeard(const std::string& text) {
+    ESP_LOGI(TAG, "heard: \"%s\"", text.c_str());
+    if (normalizeSpeech(text).empty()) {
+        post(AssistEvent::NotHeard);
+        endTurnAndResume();
+        return;
+    }
+    auto local = [&](VoiceCommand cmd, const std::string& phrase) {
+        if (!isActionCommand(cmd) || !speechMatchesPhrase(text, phrase)) return false;
+        ESP_LOGI(TAG, "-> built-in command %s", commandName(cmd));
+        post(AssistEvent::Command, "", "", (int)cmd);
+        endTurnAndResume();
+        return true;
+    };
+    for (int i = 0; i < kCommandPhraseCount; ++i)
+        if (local(kCommandPhrases[i].command, kCommandPhrases[i].text)) return;
+    for (const auto& [cmd, phrase] : s_cfg.extraPhrases)
+        if (local(cmd, phrase)) return;
+    startIntentRun(text);
+}
+
+static void handleReply(const cJSON* intentOutput) {
+    const cJSON* resp = cJSON_GetObjectItemCaseSensitive(intentOutput, "response");
+    const cJSON* speech = cJSON_GetObjectItemCaseSensitive(resp, "speech");
+    const cJSON* plain = cJSON_GetObjectItemCaseSensitive(speech, "plain");
+    const char* said = jstr(plain, "speech");
+    const char* cid = jstr(intentOutput, "conversation_id");
+    if (cid) {
+        s_conversationId = cid;
+        s_conversationUntil = nowMs() + kConversationMs;
+    }
+    const ReplyParts parts = splitReply(said ? said : "");
+    ESP_LOGI(TAG, "reply [%s]: \"%s\"", parts.emotion.c_str(), parts.speech.c_str());
+    finishTurn();
+    s_turnActive.store(true);  // still busy until it has spoken
+
+    post(AssistEvent::Reply, "", parts.emotion.c_str());
+    bool spoke = false;
+    if (!parts.speech.empty()) {
+        spoke = speak(parts.speech);
+        if (!spoke) post(AssistEvent::Error, "couldn't get the spoken reply");
+    }
+    if (spoke) {
+        while (soundSpeaking()) vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(pdMS_TO_TICKS(250));  // let the speaker's echo die away before listening
+    }
+    if (spoke || parts.speech.empty()) post(AssistEvent::Done);  // (a failure already showed confusion)
+    s_turnActive.store(false);
+    if (spoke && s_cfg.followUp && s_ready.load() && assistantBeginTurn(true)) {
+        voiceFollowUp();
+    } else {
+        voiceResume();
+    }
+}
+
+static void handleRunEvent(const cJSON* ev) {
+    const char* type = jstr(ev, "type");
+    const cJSON* data = cJSON_GetObjectItemCaseSensitive(ev, "data");
+    if (!type) return;
+    if (strcmp(type, "run-start") == 0) {
+        const cJSON* runner = cJSON_GetObjectItemCaseSensitive(data, "runner_data");
+        const cJSON* h = cJSON_GetObjectItemCaseSensitive(runner, "stt_binary_handler_id");
+        if (s_stage == Stage::WaitRunStart) {
+            if (!cJSON_IsNumber(h)) {
+                failTurn("Home Assistant didn't accept audio");
+                return;
+            }
+            s_handlerId = h->valueint;
+            s_stage = Stage::Streaming;
+            s_deadline = nowMs() + 30000;  // voice.cpp ends the audio well before this
+        }
+    } else if (strcmp(type, "stt-vad-end") == 0) {
+        s_sttDone.store(true);
+    } else if (strcmp(type, "stt-end") == 0) {
+        const cJSON* out = cJSON_GetObjectItemCaseSensitive(data, "stt_output");
+        const char* text = jstr(out, "text");
+        s_accepting.store(false);
+        handleHeard(text ? text : "");
+    } else if (strcmp(type, "intent-end") == 0) {
+        handleReply(cJSON_GetObjectItemCaseSensitive(data, "intent_output"));
+    } else if (strcmp(type, "error") == 0) {
+        const char* code = jstr(data, "code");
+        const char* message = jstr(data, "message");
+        if (code && strcmp(code, "stt-no-text-recognized") == 0) {
+            ESP_LOGI(TAG, "no words recognized");
+            post(AssistEvent::NotHeard);
+            endTurnAndResume();
+        } else {
+            ESP_LOGW(TAG, "Home Assistant error %s: %s", code ? code : "?", message ? message : "");
+            post(AssistEvent::Error, code ? code : "error");
+            endTurnAndResume();
+        }
+    } else if (strcmp(type, "run-end") == 0) {
+        if (s_stage != Stage::Idle) failTurn("Home Assistant ended the request without an answer");
+    }
+}
+
+static void handlePipelines(const cJSON* result) {
+    const cJSON* list = cJSON_GetObjectItemCaseSensitive(result, "pipelines");
+    const char* preferred = jstr(result, "preferred_pipeline");
+    const cJSON *chosen = nullptr, *fallback = nullptr, *p;
+    std::string names;
+    cJSON_ArrayForEach(p, list) {
+        const char* name = jstr(p, "name");
+        const char* id = jstr(p, "id");
+        if (!name || !id) continue;
+        names += names.empty() ? "" : ", ";
+        names += name;
+        if (normalizeSpeech(name) == normalizeSpeech(s_cfg.pipeline) && !s_cfg.pipeline.empty()) chosen = p;
+        if (preferred && strcmp(id, preferred) == 0) fallback = p;
+    }
+    if (!chosen) {
+        if (!s_cfg.pipeline.empty())
+            ESP_LOGW(TAG, "no voice assistant named \"%s\" (found: %s); using the preferred one",
+                     s_cfg.pipeline.c_str(), names.c_str());
+        chosen = fallback;
+    }
+    if (!chosen) {
+        s_status.store("no voice assistant");
+        ESP_LOGE(TAG, "Home Assistant has no voice assistant to use");
+        return;
+    }
+    auto get = [&](const char* key) { const char* v = jstr(chosen, key); return std::string(v ? v : ""); };
+    s_pipelineId = get("id");
+    s_ttsEngine = get("tts_engine");
+    s_ttsLanguage = get("tts_language");
+    s_ttsVoice = get("tts_voice");
+    ESP_LOGI(TAG, "using voice assistant \"%s\": speech-to-text %s, conversation %s, text-to-speech %s (%s)",
+             get("name").c_str(), get("stt_engine").c_str(), get("conversation_engine").c_str(),
+             s_ttsEngine.c_str(), s_ttsVoice.empty() ? "default voice" : s_ttsVoice.c_str());
+    if (get("stt_engine").empty()) ESP_LOGW(TAG, "that voice assistant has no speech-to-text set up");
+    s_status.store("ready");
+    s_ready.store(true);
+}
+
+static void handleMessage(const std::string& text) {
+    cJSON* j = cJSON_Parse(text.c_str());
+    if (!j) return;
+    const char* type = jstr(j, "type");
+    const cJSON* idItem = cJSON_GetObjectItemCaseSensitive(j, "id");
+    const int id = cJSON_IsNumber(idItem) ? idItem->valueint : 0;
+    if (!type) {
+        cJSON_Delete(j);
+        return;
+    }
+    if (strcmp(type, "auth_required") == 0) {
+        cJSON* m = cJSON_CreateObject();
+        cJSON_AddStringToObject(m, "type", "auth");
+        cJSON_AddStringToObject(m, "access_token", s_cfg.token.c_str());
+        sendJson(m);
+    } else if (strcmp(type, "auth_ok") == 0) {
+        ESP_LOGI(TAG, "logged in (Home Assistant %s)", jstr(j, "ha_version") ? jstr(j, "ha_version") : "?");
+        s_status.store("finding voice assistant");
+        s_nextId = 1;
+        s_listId = s_nextId++;
+        cJSON* m = cJSON_CreateObject();
+        cJSON_AddNumberToObject(m, "id", s_listId);
+        cJSON_AddStringToObject(m, "type", "assist_pipeline/pipeline/list");
+        sendJson(m);
+    } else if (strcmp(type, "auth_invalid") == 0) {
+        // Don't keep retrying: Home Assistant can ban addresses after failed logins.
+        ESP_LOGE(TAG, "Home Assistant rejected the access token (ha_token in settings.txt); "
+                      "not retrying until restart");
+        s_tokenRejected = true;
+        s_status.store("token rejected");
+    } else if (strcmp(type, "result") == 0) {
+        const cJSON* ok = cJSON_GetObjectItemCaseSensitive(j, "success");
+        if (id == s_listId) {
+            if (cJSON_IsTrue(ok)) handlePipelines(cJSON_GetObjectItemCaseSensitive(j, "result"));
+            else ESP_LOGE(TAG, "couldn't list voice assistants");
+        } else if (id == s_runId && !cJSON_IsTrue(ok)) {
+            const cJSON* err = cJSON_GetObjectItemCaseSensitive(j, "error");
+            const char* msg = jstr(err, "message");
+            ESP_LOGW(TAG, "request refused: %s", msg ? msg : "?");
+            failTurn("Home Assistant refused the request");
+        }
+    } else if (strcmp(type, "event") == 0 && id == s_runId && s_runId != 0) {
+        handleRunEvent(cJSON_GetObjectItemCaseSensitive(j, "event"));
+    }
+    cJSON_Delete(j);
+}
+
+static void startWebsocket() {
+    static std::string uri;
+    uri = s_cfg.url;
+    if (uri.rfind("https://", 0) == 0) uri = "wss://" + uri.substr(8);
+    else if (uri.rfind("http://", 0) == 0) uri = "ws://" + uri.substr(7);
+    uri += "/api/websocket";
+
+    esp_websocket_client_config_t wc = {};
+    wc.uri = uri.c_str();
+    wc.buffer_size = 4096;
+    wc.task_stack = 6144;
+    wc.task_prio = 4;
+    wc.task_core_id_set = true;
+    wc.task_core_id = 1;
+    wc.reconnect_timeout_ms = 10000;
+    wc.network_timeout_ms = 10000;
+    wc.ping_interval_sec = 20;
+    wc.pingpong_timeout_sec = 60;
+    wc.crt_bundle_attach = esp_crt_bundle_attach;
+    s_ws = esp_websocket_client_init(&wc);
+    esp_websocket_register_events(s_ws, WEBSOCKET_EVENT_ANY, onWsEvent, nullptr);
+    s_status.store("connecting");
+    ESP_LOGI(TAG, "connecting to %s", uri.c_str());
+    esp_websocket_client_start(s_ws);
+}
+
+static void assistantTask(void*) {
+    s_status.store("waiting for Wi-Fi");
+    while (!wifiConnected()) vTaskDelay(pdMS_TO_TICKS(200));
+    startWebsocket();
+
+    while (true) {
+        std::string* msg = nullptr;
+        const TickType_t wait = s_stage == Stage::Idle ? pdMS_TO_TICKS(30) : pdMS_TO_TICKS(10);
+        if (xQueueReceive(s_inbox, &msg, wait) == pdTRUE) {
+            if (msg) {
+                handleMessage(*msg);
+                delete msg;
+            } else if (s_stage != Stage::Idle) {
+                failTurn("lost the connection to Home Assistant");  // disconnected mid-turn
+            }
+        }
+        if (s_tokenRejected) {
+            s_tokenRejected = false;
+            s_ready.store(false);
+            esp_websocket_client_stop(s_ws);
+        }
+
+        if (s_stage == Stage::Idle && s_turnPending.exchange(false)) startSttRun();
+        if (s_stage == Stage::Streaming) pumpAudio();
+        if (s_stage != Stage::Idle && (int32_t)(nowMs() - s_deadline) > 0) {
+            failTurn(s_stage == Stage::WaitIntent ? "the AI took too long to answer"
+                     : s_stage == Stage::WaitStt  ? "speech-to-text took too long"
+                                                  : "Home Assistant didn't respond");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+bool assistantStart(const AssistantConfig& cfg, QueueHandle_t events) {
+    if (cfg.url.empty() || cfg.token.empty()) return false;
+    s_cfg = cfg;
+    s_events = events;
+    cJSON_Hooks hooks = {psramMalloc, psramFree};
+    cJSON_InitHooks(&hooks);
+    s_inbox = xQueueCreate(24, sizeof(std::string*));
+    s_audio = xStreamBufferCreateWithCaps(kSampleRate * 2 * 4, 1, MALLOC_CAP_SPIRAM);  // 4 s
+    if (!s_inbox || !s_audio) return false;
+    xTaskCreatePinnedToCore(assistantTask, "assistant", 8192, nullptr, 3, &s_task, 1);
+    return true;
+}
+
+bool assistantAvailable() { return s_ready.load() && !s_turnActive.load(); }
+const char* assistantStatus() { return s_status.load(); }
+
+bool assistantBeginTurn(bool followUp) {
+    if (!s_ready.load()) return false;
+    bool expected = false;
+    if (!s_turnActive.compare_exchange_strong(expected, true)) return false;
+    s_followUpTurn.store(followUp);
+    s_audioEnded.store(false);
+    s_heardSpeech.store(false);
+    s_sttDone.store(false);
+    s_accepting.store(true);
+    s_turnPending.store(true);
+    return true;
+}
+
+void assistantAudio(const int16_t* pcm, int samples) {
+    if (!s_accepting.load()) return;
+    xStreamBufferSend(s_audio, pcm, samples * sizeof(int16_t), 0);  // drops if Home Assistant is far behind
+}
+
+void assistantEndAudio(bool heardSpeech) {
+    s_heardSpeech.store(heardSpeech);
+    s_audioEnded.store(true);
+    if (heardSpeech) post(AssistEvent::Thinking);
+}
+
+bool assistantSttDone() { return s_sttDone.load(); }

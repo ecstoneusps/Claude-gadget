@@ -37,6 +37,17 @@ struct BuddyConfig {
     // Motion
     bool flipTiltX = false;
     bool flipTiltY = false;
+
+    // Talking with the AI, through Home Assistant's voice assistant
+    std::string wifiName;
+    std::string wifiPassword;
+    std::string haUrl;               // http://192.168.1.20:8123
+    std::string haToken;             // long-lived access token: never logged
+    std::string haPipeline = "Buddy";  // the voice assistant's name in Home Assistant
+    bool conversation = true;        // off: only the built-in commands, even with Wi-Fi set up
+    bool followUp = true;            // keep listening after an answer, without "Hey Buddy"
+
+    bool aiConfigured() const { return conversation && !wifiName.empty() && !haUrl.empty() && !haToken.empty(); }
 };
 
 // Reads settings.txt contents into `cfg` (starting from whatever it holds,
@@ -47,6 +58,10 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
 // The commented settings.txt written to a fresh card, showing every option at
 // its default value.
 std::string defaultConfigText();
+
+// For a settings.txt written by an older version: the sections it is
+// missing (to append to the file), or "" if it has them all.
+std::string configUpgradeText(const std::string& existing);
 
 // "say.good_night" style key for a command, and the reverse lookup.
 std::string commandKey(VoiceCommand c);

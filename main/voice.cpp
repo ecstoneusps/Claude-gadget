@@ -17,12 +17,25 @@
 #include "model_path.h"
 
 #include "Companion.h"  // command phrase table
+#include "assistant.h"
 #include "audio_io.h"
+#include "esp_timer.h"
 
 static const char* TAG = "voice";
 
 static_assert(kAudioSampleRate == 16000, "ESP-SR expects 16 kHz audio");
 static constexpr int kCommandWindowMs = 6000;       // time to say a command after "Hey Buddy"
+// Conversation mode: when to stop sending what you say.
+static constexpr uint32_t kStartTalkingMs = 6000;    // nothing said this long after "Hey Buddy": give up
+static constexpr uint32_t kFollowUpStartMs = 5000;   // ...or after an answer
+static constexpr uint32_t kEndSilenceMs = 1000;      // a pause this long ends what you're saying
+static constexpr uint32_t kMaxUtteranceMs = 15000;
+static constexpr uint32_t kBusyMaxMs = 180000;       // safety net if the assistant never hands back
+
+static std::atomic<int> s_handBack{0};  // 1 = resume wake word, 2 = follow-up listening
+
+void voiceResume() { s_handBack.store(1); }
+void voiceFollowUp() { s_handBack.store(2); }
 
 static const esp_afe_sr_iface_t* s_afe = nullptr;
 static esp_afe_sr_data_t* s_afeData = nullptr;
@@ -68,31 +81,92 @@ static void feedTask(void*) {
     }
 }
 
-// AFE -> wake word / command recognition.
+// AFE -> wake word / command recognition / streaming to the assistant.
 static void detectTask(void*) {
     const int afeChunk = s_afe->get_fetch_chunksize(s_afeData);
     const int mnChunk = s_mn->get_samp_chunksize(s_mnData);
     if (afeChunk != mnChunk) ESP_LOGW(TAG, "chunk mismatch: afe %d vs multinet %d", afeChunk, mnChunk);
 
-    bool awaiting = false;
+    enum class Mode { Idle, Command, Stream, Busy } mode = Mode::Idle;
+    bool followUp = false, heard = false;
+    uint32_t since = 0, lastSpeech = 0;
+    auto ms = [] { return (uint32_t)(esp_timer_get_time() / 1000); };
+    auto toIdle = [&] {
+        mode = Mode::Idle;
+        s_afe->enable_wakenet(s_afeData);
+    };
+    auto startStream = [&](bool isFollowUp) {
+        mode = Mode::Stream;
+        followUp = isFollowUp;
+        heard = false;
+        since = lastSpeech = ms();
+    };
+
     while (true) {
         afe_fetch_result_t* res = s_afe->fetch(s_afeData);
         if (!res || res->ret_value == ESP_FAIL) {
             vTaskDelay(1);
             continue;
         }
+        const bool speech = res->vad_state == VAD_SPEECH;
         s_levelDb.store(res->data_volume);
-        s_speech.store(res->vad_state == VAD_SPEECH);
+        s_speech.store(speech);
+        const uint32_t now = ms();
+
+        // The assistant finished a turn (it's been speaking its answer meanwhile).
+        // Only taken once we're done streaming, so an early hand-back isn't lost.
+        if (mode == Mode::Busy) {
+            const int handBack = s_handBack.exchange(0);
+            if (handBack == 1 || now - since > kBusyMaxMs) {
+                toIdle();
+            } else if (handBack == 2) {
+                ESP_LOGI(TAG, "listening for a follow-up");
+                startStream(true);
+                post(VoiceEvent::FollowUp);
+            }
+        }
 
         if (res->wakeup_state == WAKENET_DETECTED) {
-            ESP_LOGI(TAG, "wake word");
-            s_mn->clean(s_mnData);
-            s_afe->disable_wakenet(s_afeData);  // don't re-trigger while listening for a command
-            awaiting = true;
+            s_afe->disable_wakenet(s_afeData);  // don't re-trigger while listening
+            s_handBack.store(0);                // left over from an earlier turn
+            if (assistantAvailable() && assistantBeginTurn(false)) {
+                ESP_LOGI(TAG, "wake word; listening (AI)");
+                startStream(false);
+            } else {
+                ESP_LOGI(TAG, "wake word; listening for a command");
+                s_mn->clean(s_mnData);
+                mode = Mode::Command;
+            }
             post(VoiceEvent::WakeWord);
             continue;
         }
-        if (!awaiting) continue;
+
+        if (mode == Mode::Stream) {
+            assistantAudio(res->data, res->data_size / (int)sizeof(int16_t));
+            if (speech) {
+                heard = true;
+                lastSpeech = now;
+            }
+            const bool sttDone = assistantSttDone();  // Home Assistant heard you stop
+            const bool done = sttDone || (heard && now - lastSpeech > kEndSilenceMs) ||
+                              (!heard && now - since > (followUp ? kFollowUpStartMs : kStartTalkingMs)) ||
+                              now - since > kMaxUtteranceMs;
+            if (done) {
+                const bool spoke = heard || sttDone;
+                assistantEndAudio(spoke);
+                if (spoke) {
+                    mode = Mode::Busy;
+                    since = now;
+                } else {
+                    ESP_LOGI(TAG, "%s", followUp ? "no follow-up" : "nothing said");
+                    post(followUp ? VoiceEvent::FollowUpEnd : VoiceEvent::Timeout);
+                    toIdle();
+                }
+            }
+            continue;
+        }
+
+        if (mode != Mode::Command) continue;
 
         esp_mn_state_t st = s_mn->detect(s_mnData, res->data);
         if (st == ESP_MN_STATE_DETECTED) {
@@ -109,8 +183,7 @@ static void detectTask(void*) {
         } else {
             continue;
         }
-        awaiting = false;
-        s_afe->enable_wakenet(s_afeData);
+        toIdle();
     }
 }
 

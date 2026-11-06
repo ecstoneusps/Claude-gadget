@@ -65,6 +65,27 @@ const char* commandName(VoiceCommand c) {
     }
 }
 
+bool isActionCommand(VoiceCommand c) {
+    switch (c) {
+        case VoiceCommand::GoodNight:
+        case VoiceCommand::WakeUp:
+        case VoiceCommand::LookLeft:
+        case VoiceCommand::LookRight:
+        case VoiceCommand::BeHappy:
+        case VoiceCommand::BeSad:
+        case VoiceCommand::BeAngry:
+        case VoiceCommand::BeSurprised:
+        case VoiceCommand::BeQuiet:
+        case VoiceCommand::SoundOn:
+        case VoiceCommand::Wink:
+        case VoiceCommand::BeCool:
+        case VoiceCommand::BeSilly:
+            return true;
+        default:
+            return false;  // hello, how are you, jokes, compliments: the AI answers those
+    }
+}
+
 namespace {
 // Wrap-safe "a is before b" for millisecond timestamps.
 inline bool before(uint32_t a, uint32_t b) { return (int32_t)(a - b) < 0; }
@@ -155,7 +176,7 @@ void Companion::greet(uint32_t now) {
 
 void Companion::onArrived(uint32_t now) {
     present_ = true;
-    if (awaiting_) return;  // mid-conversation; don't interrupt
+    if (awaiting_ || thinking_ || replying_) return;  // mid-conversation; don't interrupt
     interact(now, true);    // wakes it, even from "good night"
     greet(now);
 }
@@ -209,7 +230,8 @@ void Companion::onAudio(float db, bool speech, uint32_t now) {
     prevDb_ = db;
     if (asleep_) return;  // sleeping through the noise
 
-    if (!awaiting_ && jump > clapJumpDb && db > clapMinDb) {
+    const bool conversing = awaiting_ || thinking_ || replying_;
+    if (!conversing && jump > clapJumpDb && db > clapMinDb) {
         interact(now, false);
         react(Expression::Surprised, 1200, now);
         play(Sfx::Surprised, now);
@@ -240,6 +262,7 @@ void Companion::onWakeWord(uint32_t now) {
 
 void Companion::onCommand(VoiceCommand cmd, uint32_t now) {
     awaiting_ = false;
+    thinking_ = false;
     lastVoiceEvent_ = now;
     voiceEventSeen_ = true;
     interact(now, true);
@@ -330,8 +353,64 @@ bool Companion::onEmotion(const char* emotion, uint32_t now, uint32_t ms) {
     return true;
 }
 
+void Companion::onHeard(uint32_t now) {
+    awaiting_ = false;
+    thinking_ = true;
+    thinkingSince_ = now;
+    lastVoiceEvent_ = now;
+    voiceEventSeen_ = true;
+    interact(now, true);
+    reactionUntil_ = now;
+}
+
+void Companion::onReply(const char* emotion, uint32_t now) {
+    thinking_ = false;
+    awaiting_ = false;
+    replying_ = true;
+    lastVoiceEvent_ = now;
+    voiceEventSeen_ = true;
+    interact(now, true);
+    Expression e;
+    replyExpr_ = (emotion && expressionForEmotion(emotion, e)) ? e : Expression::Happy;
+    if (replyExpr_ == Expression::Neutral) replyExpr_ = Expression::Happy;  // friendlier while talking
+    reactionUntil_ = now;
+}
+
+void Companion::onReplyDone(uint32_t now) {
+    replying_ = false;
+    speaking_ = false;
+    lastVoiceEvent_ = now;
+    interact(now, true);
+    react(replyExpr_, 1500, now);  // let the expression linger a moment
+}
+
+void Companion::onAssistantError(uint32_t now) {
+    thinking_ = false;
+    replying_ = false;
+    speaking_ = false;
+    awaiting_ = false;
+    lastVoiceEvent_ = now;
+    voiceEventSeen_ = true;
+    react(Expression::Confused, 2000, now);
+    play(Sfx::Confused, now);
+}
+
+void Companion::onFollowUp(uint32_t now) {
+    awaiting_ = true;
+    lastVoiceEvent_ = now;
+    voiceEventSeen_ = true;
+    interact(now, true);
+}
+
+void Companion::onFollowUpEnd(uint32_t now) {
+    awaiting_ = false;
+    thinking_ = false;
+    lastVoiceEvent_ = now;
+}
+
 void Companion::onCommandTimeout(uint32_t now) {
     awaiting_ = false;
+    thinking_ = false;
     lastVoiceEvent_ = now;
     voiceEventSeen_ = true;
     react(Expression::Confused, 1500, now);  // "hmm? never mind"
@@ -339,6 +418,10 @@ void Companion::onCommandTimeout(uint32_t now) {
 }
 
 void Companion::update(uint32_t now) {
+    // A conversation in progress keeps it awake.
+    if (thinking_ && now - thinkingSince_ > thinkingTimeoutMs) thinking_ = false;
+    if (thinking_ || replying_ || speaking_) lastInteraction_ = now;
+
     // Someone at the desk keeps it awake; it starts counting down once they've gone.
     if (present_ && !asleep_ && now - lastInteraction_ <= sleepAfterMs) lastInteraction_ = now;
 
@@ -362,6 +445,8 @@ void Companion::update(uint32_t now) {
     if (speech_ && !asleep_) want = Expression::Listening;
     if (before(now, reactionUntil_)) want = reaction_;
     if (awaiting_) want = Expression::Listening;
+    if (thinking_) want = Expression::Thinking;
+    if (replying_ || speaking_) want = replyExpr_;
     if (want != face_.expression()) face_.setExpression(want);
 
     // Gaze priority: commanded look > your face > attentive (awaiting) > tilt > wander.
@@ -369,9 +454,11 @@ void Companion::update(uint32_t now) {
     float gx = 0, gy = 0;
     if (before(now, lookUntil_)) {
         gx = lookX_; gy = lookY_;
+    } else if (thinking_) {
+        gx = 0.45f; gy = -0.55f;  // looking up and away, pondering
     } else if (seesFace(now) && !asleep_) {
         gx = faceX_; gy = faceY_;
-    } else if (awaiting_) {
+    } else if (awaiting_ || replying_) {
         gx = 0; gy = 0;
     } else if (tilted_) {
         gx = tiltX_; gy = tiltY_;
@@ -393,5 +480,6 @@ void Companion::update(uint32_t now) {
         if (t < sfxDurationMs(playing_)) talk = fmaxf(talk, sfxLevelAt(playing_, t));
         else playing_ = Sfx::None;
     }
+    if (speaking_) talk = fmaxf(talk, speechLevel_);
     face_.setTalkLevel(talk);
 }

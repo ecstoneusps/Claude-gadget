@@ -14,7 +14,9 @@
 // Runs in two FreeRTOS tasks on core 0 and posts events to a queue.
 
 struct VoiceEvent {
-    enum Type : uint8_t { WakeWord, Command, Timeout } type;
+    // FollowUp: listening again after an AI answer (no wake word needed).
+    // FollowUpEnd: nobody said anything, so it stopped listening.
+    enum Type : uint8_t { WakeWord, Command, Timeout, FollowUp, FollowUpEnd } type;
     int commandId;  // VoiceCommand value, for Command events
     float prob;     // recognizer confidence, for Command events
 };
@@ -32,3 +34,10 @@ bool voiceStart(QueueHandle_t events,
 float voiceLevelDb();
 const char* voiceFrontEnd();  // "MM" (both mics), "M" (one) or "off"
 bool voiceSpeech();
+
+// Conversation mode (see assistant.h): after the wake word, if the assistant is
+// available, what you say streams to it instead of the command recognizer.
+// When the turn is over the assistant calls voiceResume() (back to waiting for
+// "Hey Buddy") or voiceFollowUp() (listen again straight away).
+void voiceResume();
+void voiceFollowUp();

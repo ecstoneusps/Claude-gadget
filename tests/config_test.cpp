@@ -34,6 +34,10 @@ static void test_default_file_round_trips() {
     CHECK(cfg.proximity == d.proximity && cfg.proximitySensitivity == d.proximitySensitivity);
     CHECK(cfg.flipTiltX == d.flipTiltX && cfg.flipTiltY == d.flipTiltY);
     CHECK(cfg.extraPhrases.empty());  // examples are commented out
+    CHECK(cfg.wifiName.empty() && cfg.wifiPassword.empty() && cfg.haUrl.empty() && cfg.haToken.empty());
+    CHECK(cfg.haPipeline == "Buddy");
+    CHECK(cfg.conversation && cfg.followUp);
+    CHECK(!cfg.aiConfigured());
 }
 
 static void test_values_and_formats() {
@@ -116,6 +120,62 @@ static void test_repo_copy_matches_firmware_default() {
     CHECK(ss.str() == defaultConfigText());
 }
 
+static void test_ai_settings() {
+    BuddyConfig cfg;
+    std::vector<std::string> w;
+    parseConfig("wifi_name = My Home WiFi   # the house network\r\n"
+                "wifi_password = \"pa ss#word \"  # quoted: keeps the # and spaces\n"
+                "ha_url = http://192.168.1.20:8123/\n"
+                "ha_token = eyJhbGciOi.abc.def\n"
+                "ha_pipeline = Buddy brain\n"
+                "follow_up = off\n",
+                cfg, w);
+    for (auto& s : w) printf("  unexpected warning: %s\n", s.c_str());
+    CHECK(w.empty());
+    CHECK(cfg.wifiName == "My Home WiFi");
+    CHECK(cfg.wifiPassword == "pa ss#word ");
+    CHECK(cfg.haUrl == "http://192.168.1.20:8123");  // trailing slash dropped
+    CHECK(cfg.haToken == "eyJhbGciOi.abc.def");
+    CHECK(cfg.haPipeline == "Buddy brain");
+    CHECK(!cfg.followUp);
+    CHECK(cfg.aiConfigured());
+    cfg.conversation = false;
+    CHECK(!cfg.aiConfigured());
+}
+
+static void test_ai_settings_mistakes() {
+    BuddyConfig cfg;
+    std::vector<std::string> w;
+    parseConfig("ha_url = 192.168.1.20:8123\n"
+                "wifi_password = short\n"
+                "wifi_password = \"unterminated\n"
+                "ha_token = abc def\n"
+                "wifi_name = \"x\" y\n"
+                "# comment = not a setting\n"
+                "just words # and a comment\n",
+                cfg, w);
+    CHECK(w.size() == 6);
+    CHECK(cfg.haUrl.empty() && cfg.wifiPassword.empty() && cfg.haToken.empty() && cfg.wifiName.empty());
+    // Warnings name the setting but never echo its value (the token is a secret).
+    for (auto& s : w) CHECK(s.find("abc def") == std::string::npos);
+}
+
+static void test_upgrade_old_file() {
+    // A file from before the AI settings existed gets the new section appended once.
+    std::string old = "volume = 40\nbrightness = 50";
+    const std::string extra = configUpgradeText(old);
+    CHECK(extra.find("ha_token") != std::string::npos);
+    CHECK(extra.find("wifi_name") != std::string::npos);
+    const std::string upgraded = old + extra;
+    CHECK(configUpgradeText(upgraded).empty());
+    CHECK(configUpgradeText(defaultConfigText()).empty());
+    BuddyConfig cfg;
+    std::vector<std::string> w;
+    parseConfig(upgraded, cfg, w);
+    CHECK(w.empty());
+    CHECK(cfg.volume == 40 && cfg.brightness == 50 && cfg.haPipeline == "Buddy");
+}
+
 int main(int argc, char** argv) {
     if (argc > 1 && strcmp(argv[1], "--write-settings") == 0) g_writeSettings = argv[1];
     struct { const char* name; void (*fn)(); } tests[] = {
@@ -124,6 +184,9 @@ int main(int argc, char** argv) {
         {"bad lines warn and keep defaults", test_bad_lines_warn_and_keep_defaults},
         {"extra phrases", test_extra_phrases},
         {"command keys round trip", test_command_keys_round_trip},
+        {"AI settings", test_ai_settings},
+        {"AI settings mistakes", test_ai_settings_mistakes},
+        {"older settings file is upgraded", test_upgrade_old_file},
         {"repo copy of settings.txt matches firmware", test_repo_copy_matches_firmware_default},
     };
     for (auto& t : tests) {

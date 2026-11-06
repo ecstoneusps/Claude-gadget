@@ -1,7 +1,8 @@
 # Name,   Type, SubType, Offset,   Size
 nvs,      data, nvs,     0x9000,   0x6000
 phy_init, data, phy,     0xf000,   0x1000
-factory,  app,  factory, 0x10000,  4M
+# The app: room to grow (Wi-Fi, the Home Assistant client).
+factory,  app,  factory, 0x10000,  7M
 # Speech models (wake word + command recognizer). ESP-SR's build flashes
 # srmodels.bin here automatically on `idf.py flash`.
 model,    data, spiffs,  ,         8M

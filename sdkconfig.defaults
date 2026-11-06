@@ -42,3 +42,9 @@ CONFIG_CAMERA_CORE1=y
 
 # FAT long file names on the SD card (settings.txt, and later sounds/photos)
 CONFIG_FATFS_LFN_HEAP=y
+
+# --- Wi-Fi and the Home Assistant connection ---
+# TLS buffers in PSRAM (only used with an https:// Home Assistant address)
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y

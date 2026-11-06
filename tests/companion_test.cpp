@@ -499,6 +499,106 @@ static void test_proximity_leave_ignored_while_face_visible() {
     CHECK(r.expr() != Expression::Sleepy);
 }
 
+static void test_conversation_listen_think_speak() {
+    Rig r;
+    r.c.onWakeWord(r.now);
+    r.run(100);
+    CHECK(r.expr() == Expression::Listening);
+    r.c.onHeard(r.now);
+    r.run(100);
+    CHECK(r.expr() == Expression::Thinking);
+    CHECK(r.c.isThinking());
+    r.c.onReply("laughing", r.now);
+    r.c.setSpeaking(true, 0.8f);
+    r.run(100);
+    CHECK(!r.c.isThinking());
+    CHECK(r.expr() == Expression::Laughing);
+    r.run(20000);  // a long answer keeps it awake and in the reply's mood
+    CHECK(r.expr() == Expression::Laughing);
+    r.c.setSpeaking(false, 0);
+    r.c.onReplyDone(r.now);
+    r.run(500);
+    CHECK(r.expr() == Expression::Laughing);  // lingers a moment
+    r.run(2000);
+    CHECK(r.expr() == Expression::Neutral);
+}
+
+static void test_reply_without_tag_is_happy() {
+    Rig r;
+    r.c.onHeard(r.now);
+    r.c.onReply("", r.now);
+    r.run(100);
+    CHECK(r.expr() == Expression::Happy);
+    r.c.onReplyDone(r.now);
+    r.c.onHeard(r.now);
+    r.c.onReply("not-an-emotion", r.now);
+    r.run(100);
+    CHECK(r.expr() == Expression::Happy);
+}
+
+static void test_thinking_keeps_awake_but_times_out() {
+    Rig r;
+    r.c.thinkingTimeoutMs = 30000;
+    r.c.onHeard(r.now);
+    r.run(25000);
+    CHECK(r.expr() == Expression::Thinking);
+    r.run(10000);
+    CHECK(!r.c.isThinking());
+    CHECK(r.expr() == Expression::Neutral);
+}
+
+static void test_assistant_error_is_confused() {
+    Rig r;
+    r.c.onHeard(r.now);
+    r.run(100);
+    r.c.onAssistantError(r.now);
+    CHECK(r.c.takeSound() == Sfx::Confused);
+    r.run(100);
+    CHECK(r.expr() == Expression::Confused);
+    CHECK(!r.c.isThinking());
+}
+
+static void test_follow_up_listens_quietly() {
+    Rig r;
+    r.c.onFollowUp(r.now);
+    CHECK(r.c.takeSound() == Sfx::None);
+    r.run(100);
+    CHECK(r.expr() == Expression::Listening);
+    r.c.onFollowUpEnd(r.now);
+    CHECK(r.c.takeSound() == Sfx::None);
+    r.run(100);
+    CHECK(r.expr() == Expression::Neutral);
+}
+
+static void test_mouth_follows_speech_level() {
+    Rig r;
+    r.c.onReply("happy", r.now);
+    r.c.setSpeaking(true, 1.0f);
+    r.run(100);
+    CHECK(r.face.talkLevel() > 0.9f);
+    r.c.setSpeaking(true, 0.2f);
+    r.run(100);
+    CHECK(r.face.talkLevel() < 0.3f);
+}
+
+static void test_no_clap_reaction_while_replying() {
+    Rig r;
+    r.c.onReply("cool", r.now);
+    r.run(100);
+    r.c.onAudio(-60, false, r.now);
+    r.c.onAudio(-10, false, r.now);
+    r.run(100);
+    CHECK(r.expr() == Expression::Cool);
+}
+
+static void test_action_commands() {
+    CHECK(isActionCommand(VoiceCommand::Wink));
+    CHECK(isActionCommand(VoiceCommand::GoodNight));
+    CHECK(isActionCommand(VoiceCommand::BeQuiet));
+    CHECK(!isActionCommand(VoiceCommand::TellJoke));
+    CHECK(!isActionCommand(VoiceCommand::HowAreYou));
+}
+
 int main() {
     struct { const char* name; void (*fn)(); } tests[] = {
         {"tap makes happy then neutral", test_tap_makes_happy_then_neutral},
@@ -536,6 +636,14 @@ int main() {
         {"stays awake while it sees you", test_stays_awake_while_it_sees_you},
         {"stays awake while present", test_stays_awake_while_present},
         {"proximity leave ignored while face visible", test_proximity_leave_ignored_while_face_visible},
+        {"conversation: listen, think, speak", test_conversation_listen_think_speak},
+        {"reply without tag is happy", test_reply_without_tag_is_happy},
+        {"thinking keeps awake but times out", test_thinking_keeps_awake_but_times_out},
+        {"assistant error is confused", test_assistant_error_is_confused},
+        {"follow-up listens quietly", test_follow_up_listens_quietly},
+        {"mouth follows speech level", test_mouth_follows_speech_level},
+        {"no clap reaction while replying", test_no_clap_reaction_while_replying},
+        {"action commands", test_action_commands},
     };
     for (auto& t : tests) {
         int before = failures;

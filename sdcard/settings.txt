@@ -42,3 +42,14 @@ proximity_sensitivity        = 25     # lower notices you from further away (but
 # --- Motion ---
 flip_tilt_x                  = off    # turn on if tilting left/right makes the eyes go the wrong way
 flip_tilt_y                  = off    # same for tilting forward/back
+
+# --- Talking with the AI (through Home Assistant) ---
+# Fill in all four to talk to Buddy's AI. Put "quotes" around the password
+# if it has a # in it. Keep this card private: the token is a password.
+wifi_name                    =        # your Wi-Fi network (2.4 GHz)
+wifi_password                =        # its password
+ha_url                       =        # Home Assistant's address, e.g. http://192.168.1.20:8123
+ha_token                     =        # long-lived access token (from the Desk Buddy user)
+ha_pipeline                  = Buddy  # name of the voice assistant in Home Assistant
+conversation                 = on     # off = only the built-in commands
+follow_up                    = on     # keep listening after an answer, no "Hey Buddy" needed

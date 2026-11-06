@@ -11,6 +11,9 @@
 //   main/settings.cpp     settings kept across restarts (mute)
 //   main/sdcard.cpp       microSD card; settings.txt is read from it at startup
 //   components/config     parses settings.txt (portable, unit-tested)
+//   main/wifi.cpp         Wi-Fi
+//   main/assistant.cpp    talking with an AI through Home Assistant's voice assistant
+//   components/assist     reply text and audio helpers for that (portable, unit-tested)
 //   this file             hardware glue: display, touch, IMU, battery, main loop
 
 #include <math.h>
@@ -29,6 +32,7 @@
 #include "Companion.h"
 #include "Face.h"
 #include "Presence.h"
+#include "assistant.h"
 #include "audio_io.h"
 #include "camera.h"
 #include "i2c_bus.h"
@@ -37,6 +41,7 @@
 #include "settings.h"
 #include "sound.h"
 #include "voice.h"
+#include "wifi.h"
 
 static const char* TAG = "main";
 
@@ -79,6 +84,8 @@ static M5CanvasAdapter canvasAdapter(canvas);
 static Face face;
 static Companion buddy(face);
 static QueueHandle_t voiceEvents;
+static QueueHandle_t assistEvents;
+static std::atomic<bool> aiStarted{false};
 static std::atomic<bool> voiceOk{false};
 static bool audioOk = false, cameraOkFlag = false, proxOkFlag = false;
 
@@ -191,8 +198,37 @@ static void handleVoice(uint32_t now) {
             case VoiceEvent::Timeout:
                 buddy.onCommandTimeout(now);
                 break;
+            case VoiceEvent::FollowUp:
+                buddy.onFollowUp(now);
+                break;
+            case VoiceEvent::FollowUpEnd:
+                buddy.onFollowUpEnd(now);
+                break;
         }
     }
+}
+
+// The AI conversation: thinking, the answer's mood, the mouth while it speaks.
+static void handleAssistant(uint32_t now) {
+    if (!aiStarted.load()) return;
+    AssistEvent ev;
+    while (xQueueReceive(assistEvents, &ev, 0) == pdTRUE) {
+        switch (ev.type) {
+            case AssistEvent::Thinking: buddy.onHeard(now); break;
+            case AssistEvent::Command:
+                ESP_LOGI(TAG, "-> %s", commandName((VoiceCommand)ev.command));
+                buddy.onCommand((VoiceCommand)ev.command, now);
+                break;
+            case AssistEvent::Reply: buddy.onReply(ev.emotion, now); break;
+            case AssistEvent::Done: buddy.onReplyDone(now); break;
+            case AssistEvent::NotHeard:
+                if (ev.followUp) buddy.onFollowUpEnd(now);
+                else buddy.onCommandTimeout(now);
+                break;
+            case AssistEvent::Error: buddy.onAssistantError(now); break;
+        }
+    }
+    buddy.setSpeaking(soundSpeaking(), soundSpeechLevel());
 }
 
 // Loading the speech models takes a few seconds, so do it off the UI task
@@ -200,6 +236,18 @@ static void handleVoice(uint32_t now) {
 static void voiceInitTask(void*) {
     if (voiceStart(voiceEvents, config.extraPhrases, config.twoMicrophones)) voiceOk.store(true);
     else ESP_LOGW(TAG, "voice disabled; touch and motion still work");
+
+    // Wi-Fi and the AI connection after the speech models, so the models get
+    // first pick of memory.
+    if (voiceOk.load() && config.aiConfigured() && wifiStart(config.wifiName, config.wifiPassword)) {
+        AssistantConfig ac;
+        ac.url = config.haUrl;
+        ac.token = config.haToken;
+        ac.pipeline = config.haPipeline;
+        ac.followUp = config.followUp;
+        ac.extraPhrases = config.extraPhrases;
+        aiStarted.store(assistantStart(ac, assistEvents));
+    }
     vTaskDelete(nullptr);
 }
 
@@ -209,6 +257,12 @@ static void loadSettings() {
     if (sdcardMount()) {
         std::string text;
         if (sdcardReadFile(kSettingsFile, text)) {
+            // Written by an older version: add the settings it doesn't have yet.
+            const std::string extra = configUpgradeText(text);
+            if (!extra.empty() && sdcardWriteFile(kSettingsFile, text + extra)) {
+                ESP_LOGI(TAG, "added the new settings (Wi-Fi, Home Assistant) to settings.txt");
+                text += extra;
+            }
             std::vector<std::string> warnings;
             parseConfig(text, config, warnings);
             for (const auto& w : warnings) ESP_LOGW(TAG, "settings.txt %s", w.c_str());
@@ -226,6 +280,18 @@ static void loadSettings() {
     ESP_LOGI(TAG, "volume %d%%, brightness %d%%, sleep after %ds, face tracking %s, proximity %s",
              config.volume, config.brightness, config.sleepAfterSeconds,
              config.faceTracking ? "on" : "off", config.proximity ? "on" : "off");
+    // Never log the token or password themselves.
+    if (config.aiConfigured()) {
+        ESP_LOGI(TAG, "AI conversation: Wi-Fi \"%s\", Home Assistant %s, voice assistant \"%s\", token set (%u chars)",
+                 config.wifiName.c_str(), config.haUrl.c_str(), config.haPipeline.c_str(),
+                 (unsigned)config.haToken.size());
+    } else if (!config.conversation) {
+        ESP_LOGI(TAG, "AI conversation: off (conversation = off)");
+    } else {
+        ESP_LOGI(TAG, "AI conversation: not set up (missing%s%s%s in settings.txt)",
+                 config.wifiName.empty() ? " wifi_name" : "", config.haUrl.empty() ? " ha_url" : "",
+                 config.haToken.empty() ? " ha_token" : "");
+    }
 }
 
 // Diagnostic view: the camera image (pixel-doubled to fill the screen) with
@@ -269,16 +335,18 @@ static void uiTask(void*) {
             handleImu(now);
         }
         handleVoice(now);
+        handleAssistant(now);
         handleProximity(now, proxOk);
         handleFace(now);
 
         // One-line health summary every 30 s, so a log opened at any time
         // shows what started (the USB monitor disconnects on every reset).
         if (lastStatus == 0 || now - lastStatus > 30000) {
-            ESP_LOGI(TAG, "status: %d fps, audio %s, voice %s (%s), sd %s, camera %s, proximity %s, "
-                          "battery %d%%%s, usb %d mV, free PSRAM %u KB, free internal %u KB",
+            ESP_LOGI(TAG, "status: %d fps, audio %s, voice %s (%s), wifi %s, ai %s, sd %s, camera %s, "
+                          "proximity %s, battery %d%%%s, usb %d mV, free PSRAM %u KB, free internal %u KB",
                      (int)(frames * 1000 / (now - lastStatus + 1)),
                      audioOk ? "ok" : "FAILED", voiceOk.load() ? "ready" : "not ready", voiceFrontEnd(),
+                     wifiStatus(), aiStarted.load() ? assistantStatus() : "off",
                      sdcardMounted() ? "ok" : "none", cameraOkFlag ? "ok" : "off/FAILED",
                      proxOkFlag ? "ok" : "off/FAILED", (int)M5.Power.getBatteryLevel(),
                      M5.Power.isCharging() ? " charging" : "", (int)M5.Power.getVBUSVoltage(),
@@ -345,6 +413,7 @@ extern "C" void app_main(void) {
     settingsBegin();
     buddy.setMuted(settingsGetBool("muted", false));
     voiceEvents = xQueueCreate(8, sizeof(VoiceEvent));
+    assistEvents = xQueueCreate(8, sizeof(AssistEvent));
     sharedI2cBus();                       // before other tasks touch the I2C bus
     const bool cameraOk = cameraBegin();
     const bool micOk = audioBegin();

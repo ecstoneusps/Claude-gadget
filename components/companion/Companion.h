@@ -41,6 +41,11 @@ extern const int kCommandPhraseCount;
 
 const char* commandName(VoiceCommand c);
 
+// Commands that change what the buddy does (look, mood, sleep, sound) rather
+// than chat. With the AI connected these still run on the device when said on
+// their own; everything else ("tell me a joke") goes to the AI.
+bool isActionCommand(VoiceCommand c);
+
 // The companion's "brain": turns events (touch, motion, sound, voice) into
 // what the face shows. Hardware-free so it can be unit-tested on a PC.
 // All times are milliseconds from any monotonic clock.
@@ -77,6 +82,24 @@ public:
     // Face.h) for `ms`, with a matching sound. For an AI server that tags its
     // replies with emotions. Returns false for unknown names.
     bool onEmotion(const char* emotion, uint32_t now, uint32_t ms = 4000);
+
+    // Conversation with the AI: after the wake word (or a follow-up), what was
+    // said went off to be understood. onHeard: it's thinking. onReply: the
+    // answer arrived (with the emotion it was tagged with, "" for none) and is
+    // about to be spoken. setSpeaking: while the reply plays, with its loudness
+    // 0..1 for the mouth. onReplyDone: finished. onAssistantError: it failed
+    // (server unreachable, nothing recognized...).
+    void onHeard(uint32_t now);
+    void onReply(const char* emotion, uint32_t now);
+    void setSpeaking(bool speaking, float level) { speaking_ = speaking; speechLevel_ = level; }
+    void onReplyDone(uint32_t now);
+    void onAssistantError(uint32_t now);
+    // Listening again for a follow-up without the wake word, and giving up on it quietly.
+    void onFollowUp(uint32_t now);
+    void onFollowUpEnd(uint32_t now);
+    bool isThinking() const { return thinking_; }
+    bool isReplying() const { return replying_; }
+    uint32_t thinkingTimeoutMs = 95000;  // stop looking thoughtful if no answer ever comes
 
     void setLowBattery(bool low) { lowBattery_ = low; }
 
@@ -153,4 +176,11 @@ private:
     uint32_t lastFace_ = 0;
     float faceX_ = 0, faceY_ = 0;
     bool greeted_ = false;
+
+    bool thinking_ = false;
+    uint32_t thinkingSince_ = 0;
+    bool replying_ = false;
+    Expression replyExpr_ = Expression::Happy;
+    bool speaking_ = false;
+    float speechLevel_ = 0;
 };

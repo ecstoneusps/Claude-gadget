@@ -82,6 +82,7 @@ public:
 
     // 0..1 mouth movement while the device is talking (from audio level).
     void setTalkLevel(float level) { talkTarget_ = level; }
+    float talkLevel() const { return talkTarget_; }
 
     void blinkNow();
     void setAutoBlink(bool on) { autoBlink_ = on; }

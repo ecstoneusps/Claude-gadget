@@ -92,19 +92,35 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
         pos = nl + 1;
         ++lineNo;
 
+        if (!line.empty() && line.back() == '\r') line.pop_back();  // Windows line endings
         const size_t hash = line.find('#');
-        if (hash != std::string::npos) line = line.substr(0, hash);
-        line = trim(line);
-        if (line.empty()) continue;
-
         const size_t eq = line.find('=');
-        if (eq == std::string::npos) {
-            warnings.push_back(lineWarning(lineNo, "expected \"name = value\""));
+        if (eq == std::string::npos || (hash != std::string::npos && hash < eq)) {
+            if (!trim(hash == std::string::npos ? line : line.substr(0, hash)).empty())
+                warnings.push_back(lineWarning(lineNo, "expected \"name = value\""));
             continue;
         }
         const std::string key = lower(trim(line.substr(0, eq)));
-        const std::string val = trim(line.substr(eq + 1));
         auto bad = [&](const char* what) { warnings.push_back(lineWarning(lineNo, key + " " + what)); };
+
+        // The value: up to a # comment, or "in quotes" to keep a # or spaces in it.
+        std::string val = trim(line.substr(eq + 1));
+        if (!val.empty() && val[0] == '"') {
+            const size_t close = val.find('"', 1);
+            if (close == std::string::npos) {
+                bad("is missing its closing quote");
+                continue;
+            }
+            const std::string after = trim(val.substr(close + 1));
+            if (!after.empty() && after[0] != '#') {
+                bad("has text after the closing quote");
+                continue;
+            }
+            val = val.substr(1, close - 1);
+        } else {
+            const size_t h = val.find('#');
+            if (h != std::string::npos) val = trim(val.substr(0, h));
+        }
 
         if (key == "volume") {
             if (!parseInt(val, 0, 100, cfg.volume)) bad("must be 0-100");
@@ -143,6 +159,28 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
             if (!parseBool(val, cfg.flipTiltX)) bad("must be on or off");
         } else if (key == "flip_tilt_y") {
             if (!parseBool(val, cfg.flipTiltY)) bad("must be on or off");
+        } else if (key == "wifi_name") {
+            if (val.size() > 32) bad("can be at most 32 characters");
+            else cfg.wifiName = val;
+        } else if (key == "wifi_password") {
+            if (!val.empty() && (val.size() < 8 || val.size() > 63)) bad("must be 8-63 characters");
+            else cfg.wifiPassword = val;
+        } else if (key == "ha_url") {
+            std::string v = val;
+            while (!v.empty() && v.back() == '/') v.pop_back();
+            const std::string lv = lower(v);
+            if (!v.empty() && lv.rfind("http://", 0) != 0 && lv.rfind("https://", 0) != 0)
+                bad("must start with http:// or https:// (e.g. http://192.168.1.20:8123)");
+            else cfg.haUrl = v;
+        } else if (key == "ha_token") {
+            if (val.find(' ') != std::string::npos) bad("must not contain spaces");
+            else cfg.haToken = val;
+        } else if (key == "ha_pipeline") {
+            cfg.haPipeline = val;
+        } else if (key == "conversation") {
+            if (!parseBool(val, cfg.conversation)) bad("must be on or off");
+        } else if (key == "follow_up") {
+            if (!parseBool(val, cfg.followUp)) bad("must be on or off");
         } else if (key.rfind("say.", 0) == 0) {
             VoiceCommand cmd;
             if (!commandFromKey(key, cmd)) {
@@ -168,6 +206,47 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
             warnings.push_back(lineWarning(lineNo, "unknown setting \"" + key + "\""));
         }
     }
+}
+
+namespace {
+// The "talking with the AI" section, also appended to older settings files.
+void addAiSection(std::string& t) {
+    const BuddyConfig d;
+    char buf[200];
+    auto add = [&](const char* line) {
+        std::string l = line;
+        while (!l.empty() && l.back() == ' ') l.pop_back();
+        t += l;
+        t += '\n';
+    };
+    auto str = [&](const char* key, const std::string& v, const char* help) {
+        snprintf(buf, sizeof buf, "%-28s = %-6s # %s", key, v.c_str(), help);
+        add(buf);
+    };
+    auto onoff = [&](const char* key, bool v, const char* help) {
+        snprintf(buf, sizeof buf, "%-28s = %-6s # %s", key, v ? "on" : "off", help);
+        add(buf);
+    };
+    add("# --- Talking with the AI (through Home Assistant) ---");
+    add("# Fill in all four to talk to Buddy's AI. Put \"quotes\" around the password");
+    add("# if it has a # in it. Keep this card private: the token is a password.");
+    str("wifi_name", d.wifiName, "your Wi-Fi network (2.4 GHz)");
+    str("wifi_password", d.wifiPassword, "its password");
+    str("ha_url", d.haUrl, "Home Assistant's address, e.g. http://192.168.1.20:8123");
+    str("ha_token", d.haToken, "long-lived access token (from the Desk Buddy user)");
+    str("ha_pipeline", d.haPipeline, "name of the voice assistant in Home Assistant");
+    onoff("conversation", d.conversation, "off = only the built-in commands");
+    onoff("follow_up", d.followUp, "keep listening after an answer, no \"Hey Buddy\" needed");
+}
+}  // namespace
+
+std::string configUpgradeText(const std::string& existing) {
+    if (existing.find("ha_token") != std::string::npos) return "";
+    std::string t;
+    if (!existing.empty() && existing.back() != '\n') t += '\n';
+    t += '\n';
+    addAiSection(t);
+    return t;
 }
 
 std::string defaultConfigText() {
@@ -245,5 +324,7 @@ std::string defaultConfigText() {
     add("# --- Motion ---");
     onoff("flip_tilt_x", d.flipTiltX, "turn on if tilting left/right makes the eyes go the wrong way");
     onoff("flip_tilt_y", d.flipTiltY, "same for tilting forward/back");
+    add("");
+    addAiSection(t);
     return t;
 }
