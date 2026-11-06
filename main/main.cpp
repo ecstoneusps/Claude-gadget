@@ -237,9 +237,8 @@ static void voiceInitTask(void*) {
     if (voiceStart(voiceEvents, config.extraPhrases, config.twoMicrophones)) voiceOk.store(true);
     else ESP_LOGW(TAG, "voice disabled; touch and motion still work");
 
-    // Wi-Fi and the AI connection after the speech models, so the models get
-    // first pick of memory.
-    if (voiceOk.load() && config.aiConfigured() && wifiStart(config.wifiName, config.wifiPassword)) {
+    // The AI connection (Wi-Fi itself started at boot, see app_main).
+    if (voiceOk.load() && config.aiConfigured() && wifiConnectedOrStarting()) {
         AssistantConfig ac;
         ac.url = config.haUrl;
         ac.token = config.haToken;
@@ -414,6 +413,9 @@ extern "C" void app_main(void) {
     buddy.setMuted(settingsGetBool("muted", false));
     voiceEvents = xQueueCreate(8, sizeof(VoiceEvent));
     assistEvents = xQueueCreate(8, sizeof(AssistEvent));
+    // Wi-Fi first, while internal RAM is still in one piece: it needs a few
+    // contiguous blocks that weren't left once the camera and models loaded.
+    if (config.aiConfigured()) wifiStart(config.wifiName, config.wifiPassword);
     sharedI2cBus();                       // before other tasks touch the I2C bus
     const bool cameraOk = cameraBegin();
     const bool micOk = audioBegin();

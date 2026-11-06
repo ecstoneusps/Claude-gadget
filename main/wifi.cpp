@@ -15,6 +15,7 @@ static const char* TAG = "wifi";
 static std::atomic<bool> s_connected{false};
 static std::atomic<const char*> s_status{"off"};
 static int s_failures = 0;
+static bool s_started = false;
 static esp_timer_handle_t s_retry = nullptr;
 
 static void retry(void*) { esp_wifi_connect(); }
@@ -99,9 +100,11 @@ bool wifiStart(const std::string& ssid, const std::string& password) {
     // Power saving adds up to a few hundred ms of delay per packet; answers
     // should come back as fast as possible.
     esp_wifi_set_ps(WIFI_PS_NONE);
+    s_started = true;
     ESP_LOGI(TAG, "connecting to \"%s\"", ssid.c_str());
     return true;
 }
 
 bool wifiConnected() { return s_connected.load(); }
+bool wifiConnectedOrStarting() { return s_started; }
 const char* wifiStatus() { return s_status.load(); }

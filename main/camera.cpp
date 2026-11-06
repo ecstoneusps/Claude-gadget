@@ -11,6 +11,7 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
 
 #include "human_face_detect.hpp"
 #include "i2c_bus.h"
@@ -224,7 +225,9 @@ void faceTrackingStart(bool accurate) {
     // Core 0, below the mic front-end (priority 5). Core 1 carries wake word +
     // commands, drawing and sound; at the lowest priority there, detection
     // was starved and only caught a face if you held still.
-    xTaskCreatePinnedToCore(faceTask, "face", 12 * 1024, accurate ? (void*)1 : nullptr, 3, nullptr, 0);
+    // 12 KB stack in PSRAM: internal RAM is needed by Wi-Fi.
+    xTaskCreatePinnedToCoreWithCaps(faceTask, "face", 12 * 1024, accurate ? (void*)1 : nullptr, 3, nullptr, 0,
+                                    MALLOC_CAP_SPIRAM);
 }
 
 void faceTrackingSetInterval(uint32_t ms) { s_intervalMs.store(ms); }
