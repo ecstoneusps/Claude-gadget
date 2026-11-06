@@ -166,7 +166,8 @@ Wire it to **Port C** (the blue Grove port) with a Grove-to-female-jumper cable:
 
 If the yellow and white wires end up the other way round, the buddy notices
 and swaps them in software. When a radar is detected it takes over from the
-proximity sensor; the log shows `radar: still, nearest 82 cm ...` every 10
+proximity sensor, and face detection (the heaviest job after speech) pauses
+whenever nobody is at the desk; the log shows `radar: still, nearest 82 cm ...` every 10
 seconds, and `radar_distance_cm` in settings.txt sets how close counts as at
 the desk.
 

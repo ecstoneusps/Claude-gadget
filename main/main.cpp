@@ -202,7 +202,17 @@ static void handleProximity(uint32_t now, bool sensorOk) {
 static void handleFace(uint32_t now) {
     // Look often while awake, now and then while dozing (seeing you wakes it),
     // and not at all after "good night".
-    faceTrackingSetInterval(buddy.isAsleep() ? 0 : buddy.wantsDim() ? 1000 : 200);
+    uint32_t interval = buddy.isAsleep() ? 0 : buddy.wantsDim() ? 1000 : 200;
+    // With a working radar, nobody at the desk means nothing to look at: no
+    // face detection (it uses ~40% of core 0) until the radar sees someone.
+    const bool nobodyHere = config.radar && radarFresh(now) && !radarPresence.present();
+    if (nobodyHere) interval = 0;
+    static bool paused = false;
+    if (nobodyHere != paused) {
+        paused = nobodyHere;
+        ESP_LOGI(TAG, "face detection %s", paused ? "paused: nobody at the desk (radar)" : "resumed");
+    }
+    faceTrackingSetInterval(interval);
 
     static uint32_t lastSeq = 0;
     const FaceSighting f = faceTrackingLatest();
@@ -505,7 +515,9 @@ extern "C" void app_main(void) {
     // contiguous blocks that weren't left once the camera and models loaded.
     if (config.aiConfigured()) wifiStart(config.wifiName, config.wifiPassword);
     sharedI2cBus();                       // before other tasks touch the I2C bus
-    const bool cameraOk = cameraBegin();
+    // The camera only runs if something uses it: it captures frames
+    // continuously once started, even with nothing looking at them.
+    const bool cameraOk = (config.faceTracking || config.cameraPreview) && cameraBegin();
     const bool micOk = audioBegin();
     audioOk = micOk;
     cameraOkFlag = cameraOk;
