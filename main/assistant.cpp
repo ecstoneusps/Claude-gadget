@@ -49,6 +49,10 @@ static std::atomic<const char*> s_status{"off"};
 
 // Websocket task only.
 static std::string s_rx;
+// Posted to the inbox when a connection opens (compared by address).
+static std::string s_connectedMarker;
+// Assistant task only: the token went out on this connection.
+static bool s_authSent = false;
 
 // Assistant task only.
 static int s_nextId = 1;
@@ -90,10 +94,11 @@ static bool sendJson(cJSON* msg) {
     cJSON_Delete(msg);
     if (!text) return false;
     const int len = strlen(text);
-    const int sent = esp_websocket_client_is_connected(s_ws)
-                         ? esp_websocket_client_send_text(s_ws, text, len, pdMS_TO_TICKS(3000))
-                         : -1;
+    const bool connected = esp_websocket_client_is_connected(s_ws);
+    const int sent = connected ? esp_websocket_client_send_text(s_ws, text, len, pdMS_TO_TICKS(3000)) : -1;
     cJSON_free(text);
+    if (sent != len)
+        ESP_LOGW(TAG, "send failed (%d of %d bytes%s)", sent, len, connected ? "" : ", not connected");
     return sent == len;
 }
 
@@ -106,11 +111,21 @@ static void onWsEvent(void*, esp_event_base_t, int32_t id, void* data) {
         case WEBSOCKET_EVENT_CONNECTED:
             ESP_LOGI(TAG, "connected to Home Assistant");
             s_status.store("logging in");
+            {
+                std::string* m = &s_connectedMarker;
+                xQueueSend(s_inbox, &m, pdMS_TO_TICKS(200));
+            }
             break;
+        case WEBSOCKET_EVENT_CLOSED:  // Home Assistant closed it (e.g. no login in time)
         case WEBSOCKET_EVENT_DISCONNECTED:
         case WEBSOCKET_EVENT_ERROR:
-            if (s_ready.exchange(false) || id == WEBSOCKET_EVENT_DISCONNECTED)
-                ESP_LOGW(TAG, "lost the connection to Home Assistant; reconnecting");
+            s_ready.store(false);
+            if (id == WEBSOCKET_EVENT_CLOSED)
+                ESP_LOGW(TAG, "Home Assistant closed the connection (code %d); reconnecting", d->close_status_code);
+            else if (id == WEBSOCKET_EVENT_DISCONNECTED)
+                ESP_LOGW(TAG, "lost the connection to Home Assistant (error type %d, HTTP %d, socket errno %d); reconnecting",
+                         (int)d->error_handle.error_type, d->error_handle.esp_ws_handshake_status_code,
+                         d->error_handle.esp_transport_sock_errno);
             if (strcmp(s_status.load(), "token rejected") != 0) s_status.store("connecting");
             {
                 std::string* none = nullptr;  // tells the assistant task to abort a turn in progress
@@ -118,7 +133,11 @@ static void onWsEvent(void*, esp_event_base_t, int32_t id, void* data) {
             }
             break;
         case WEBSOCKET_EVENT_DATA:
-            if (d->op_code != 0x1 && d->op_code != 0x0) break;  // text frames only
+            if (d->op_code != 0x1 && d->op_code != 0x0) {  // text frames only
+                if (!s_ready.load() && d->op_code != 0x9 && d->op_code != 0xA)
+                    ESP_LOGI(TAG, "ignoring frame type %d (%d bytes) while logging in", d->op_code, d->data_len);
+                break;
+            }
             if (d->payload_offset == 0) s_rx.clear();
             s_rx.append(d->data_ptr, d->data_len);
             if (d->payload_offset + d->data_len >= d->payload_len) {
@@ -472,9 +491,28 @@ static void handlePipelines(const cJSON* result) {
     s_ready.store(true);
 }
 
+// Logs in. Sent as soon as the connection opens rather than in reply to
+// Home Assistant's "auth_required": ESP-IDF 5.4's websocket transport keeps
+// that first message (which arrives in the same packet as the handshake)
+// buffered without noticing it, so waiting for it waits forever, and Home
+// Assistant drops the connection after 10 s. Its reply to the token is new
+// data, which also flushes the buffered message.
+static void sendAuth() {
+    if (s_authSent) return;
+    cJSON* m = cJSON_CreateObject();
+    cJSON_AddStringToObject(m, "type", "auth");
+    cJSON_AddStringToObject(m, "access_token", s_cfg.token.c_str());
+    s_authSent = sendJson(m);
+    if (s_authSent) ESP_LOGI(TAG, "token sent; waiting for the answer");
+}
+
 static void handleMessage(const std::string& text) {
     cJSON* j = cJSON_Parse(text.c_str());
-    if (!j) return;
+    if (!j) {
+        ESP_LOGW(TAG, "couldn't read a message from Home Assistant (%u bytes): %.60s", (unsigned)text.size(),
+                 text.c_str());
+        return;
+    }
     const char* type = jstr(j, "type");
     const cJSON* idItem = cJSON_GetObjectItemCaseSensitive(j, "id");
     const int id = cJSON_IsNumber(idItem) ? idItem->valueint : 0;
@@ -483,10 +521,7 @@ static void handleMessage(const std::string& text) {
         return;
     }
     if (strcmp(type, "auth_required") == 0) {
-        cJSON* m = cJSON_CreateObject();
-        cJSON_AddStringToObject(m, "type", "auth");
-        cJSON_AddStringToObject(m, "access_token", s_cfg.token.c_str());
-        sendJson(m);
+        sendAuth();  // normally already sent on connect
     } else if (strcmp(type, "auth_ok") == 0) {
         ESP_LOGI(TAG, "logged in (Home Assistant %s)", jstr(j, "ha_version") ? jstr(j, "ha_version") : "?");
         s_status.store("finding voice assistant");
@@ -534,6 +569,7 @@ static void startWebsocket() {
     wc.task_core_id_set = true;
     wc.task_core_id = 1;
     wc.reconnect_timeout_ms = 10000;
+    wc.enable_close_reconnect = true;  // also reconnect after Home Assistant closes the connection
     wc.network_timeout_ms = 10000;
     wc.ping_interval_sec = 20;
     wc.pingpong_timeout_sec = 60;
@@ -554,7 +590,10 @@ static void assistantTask(void*) {
         std::string* msg = nullptr;
         const TickType_t wait = s_stage == Stage::Idle ? pdMS_TO_TICKS(30) : pdMS_TO_TICKS(10);
         if (xQueueReceive(s_inbox, &msg, wait) == pdTRUE) {
-            if (msg) {
+            if (msg == &s_connectedMarker) {
+                s_authSent = false;  // new connection
+                sendAuth();
+            } else if (msg) {
                 handleMessage(*msg);
                 delete msg;
             } else if (s_stage != Stage::Idle) {
