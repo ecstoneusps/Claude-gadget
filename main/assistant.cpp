@@ -364,6 +364,17 @@ static void handleHeard(const std::string& text) {
         endTurnAndResume();
         return;
     }
+    // Just the wake word (said while it was already listening for a
+    // follow-up): treat it as one and listen for the actual question.
+    const std::string said = normalizeSpeech(text);
+    if (said == "hey buddy" || said == "hi buddy" || said == "buddy" || said == "okay buddy") {
+        ESP_LOGI(TAG, "-> that was the wake word; listening again");
+        finishTurn();
+        post(AssistEvent::WakeAgain);
+        if (assistantBeginTurn(false)) voiceFollowUp();
+        else voiceResume();
+        return;
+    }
     auto local = [&](VoiceCommand cmd, const std::string& phrase) {
         if (!isActionCommand(cmd) || !speechMatchesPhrase(text, phrase)) return false;
         ESP_LOGI(TAG, "-> built-in command %s", commandName(cmd));
@@ -629,7 +640,9 @@ bool assistantStart(const AssistantConfig& cfg, QueueHandle_t events) {
     s_audio = xStreamBufferCreateWithCaps(kSampleRate * 2 * 4, 1, MALLOC_CAP_SPIRAM);  // 4 s
     if (!s_inbox || !s_audio) return false;
     // Stack in PSRAM: internal RAM is scarce, and this task never touches flash.
-    if (xTaskCreatePinnedToCoreWithCaps(assistantTask, "assistant", 8192, nullptr, 3, &s_task, 1,
+    // Priority 5, above the UI (4): otherwise fetching a reply only ran in the
+    // UI's short pauses, which made replies slow and starved the idle task.
+    if (xTaskCreatePinnedToCoreWithCaps(assistantTask, "assistant", 8192, nullptr, 5, &s_task, 1,
                                         MALLOC_CAP_SPIRAM) != pdPASS) {
         ESP_LOGE(TAG, "out of memory starting the assistant");
         return false;

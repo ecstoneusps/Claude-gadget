@@ -226,6 +226,7 @@ static void handleAssistant(uint32_t now) {
                 else buddy.onCommandTimeout(now);
                 break;
             case AssistEvent::Error: buddy.onAssistantError(now); break;
+            case AssistEvent::WakeAgain: buddy.onWakeWord(now); break;
         }
     }
     buddy.setSpeaking(soundSpeaking(), soundSpeechLevel());

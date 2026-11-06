@@ -173,6 +173,13 @@ static void test_prepare_speech() {
     std::vector<int16_t> loud(rate);
     for (int i = 0; i < rate; ++i) loud[i] = (int16_t)(30000 * sin(2 * M_PI * 1000 * i / rate));
     CHECK(prepareSpeech(loud.data(), loud.size(), rate) == 0.0f);
+    for (int i = rate / 4; i < rate; ++i) CHECK(abs((int)loud[i]) <= 32767 * 0.98 + 1);
+
+    // Typical synthesized speech level (-17 dBFS) gets a few dB louder.
+    std::vector<int16_t> mid(rate);
+    for (int i = 0; i < rate; ++i) mid[i] = (int16_t)(6550 * sin(2 * M_PI * 800 * i / rate));
+    const float g2 = prepareSpeech(mid.data(), mid.size(), rate);
+    CHECK(g2 > 3.0f && g2 < 7.0f);
     int16_t none[4] = {0, 0, 0, 0};
     CHECK(prepareSpeech(none, 4, rate) == 0.0f);
 }

@@ -34,6 +34,7 @@ struct AssistEvent {
         Done,      // finished speaking
         NotHeard,  // no words recognized (`followUp`: it was a follow-up, so end quietly)
         Error,     // something failed (see the log); `text` says what
+        WakeAgain, // you only said "Hey Buddy" (during a follow-up): it listens again
     } type;
     bool followUp;
     int command;
