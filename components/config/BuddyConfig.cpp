@@ -425,3 +425,42 @@ std::string defaultConfigText() {
     addAiSection(t);
     return t;
 }
+
+std::string configSetValue(const std::string& text, const std::string& key, const std::string& value) {
+    const std::string want = lower(key);
+    size_t pos = 0;
+    while (pos < text.size()) {
+        size_t nl = text.find('\n', pos);
+        if (nl == std::string::npos) nl = text.size();
+        const std::string line = text.substr(pos, nl - pos);
+        const size_t first = line.find_first_not_of(" \t");
+        const size_t eq = line.find('=');
+        const size_t hash = line.find('#');
+        const bool setsIt = first != std::string::npos && line[first] != '#' && eq != std::string::npos &&
+                            (hash == std::string::npos || eq < hash) &&
+                            lower(trim(line.substr(0, eq))) == want;
+        if (setsIt) {
+            // Value: after "= " up to the comment (or the end, minus a \r).
+            size_t valStart = line.find_first_not_of(' ', eq + 1);
+            if (valStart == std::string::npos || (hash != std::string::npos && valStart >= hash)) valStart = eq + 2;
+            size_t valEnd = hash != std::string::npos ? hash : line.size();
+            if (hash == std::string::npos && !line.empty() && line.back() == '\r') --valEnd;
+            std::string newLine = line.substr(0, eq) + "= ";
+            if (valStart > eq + 2 && valStart <= line.size()) newLine = line.substr(0, valStart);
+            newLine += value;
+            if (hash != std::string::npos) {
+                // Keep the comment where it was if there's room, else one space before it.
+                size_t col = hash;
+                newLine += newLine.size() < col ? std::string(col - newLine.size(), ' ') : std::string(" ");
+                newLine += line.substr(hash);
+            } else if (!line.empty() && line.back() == '\r') {
+                newLine += '\r';
+            }
+            return text.substr(0, pos) + newLine + text.substr(nl);
+        }
+        pos = nl + 1;
+    }
+    std::string out = text;
+    if (!out.empty() && out.back() != '\n') out += '\n';
+    return out + key + " = " + value + "\n";
+}

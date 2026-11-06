@@ -1,5 +1,6 @@
 #include "Wav.h"
 
+#include <math.h>
 #include <string.h>
 
 namespace {
@@ -67,4 +68,56 @@ size_t wavToMono(const uint8_t* d, const WavInfo& w, int rate, int16_t* out, siz
         out[i] = (int16_t)(a + (((b - a) * frac) >> 16));
     }
     return n;
+}
+
+float prepareSpeech(int16_t* pcm, size_t n, int sampleRate, float maxGainDb) {
+    if (n == 0 || sampleRate <= 0) return 0;
+
+    // 1. High-pass, 2nd-order Butterworth at 250 Hz.
+    const double fc = 250.0, q = 0.7071;
+    const double w = 2 * M_PI * fc / sampleRate, cw = cos(w), alpha = sin(w) / (2 * q);
+    const double a0 = 1 + alpha;
+    const double b0 = (1 + cw) / 2 / a0, b1 = -(1 + cw) / a0, b2 = b0;
+    const double a1 = -2 * cw / a0, a2 = (1 - alpha) / a0;
+    double x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+    for (size_t i = 0; i < n; ++i) {
+        const double x = pcm[i];
+        const double y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+        x2 = x1; x1 = x; y2 = y1; y1 = y;
+        pcm[i] = (int16_t)(y > 32767 ? 32767 : y < -32768 ? -32768 : y);
+    }
+
+    // 2. Loudness of the spoken parts (20 ms blocks above -50 dBFS), to -16 dBFS.
+    const size_t block = (size_t)sampleRate / 50;
+    double sum = 0;
+    size_t voiced = 0;
+    for (size_t start = 0; start + block <= n; start += block) {
+        double e = 0;
+        for (size_t i = start; i < start + block; ++i) e += (double)pcm[i] * pcm[i];
+        e /= block;
+        if (e > 32768.0 * 32768.0 * 1e-5) {  // -50 dBFS
+            sum += e;
+            ++voiced;
+        }
+    }
+    if (voiced == 0) return 0;
+    const double rms = sqrt(sum / voiced) / 32768.0;
+    double gainDb = -16.0 - 20 * log10(rms);
+    if (gainDb > maxGainDb) gainDb = maxGainDb;
+    if (gainDb < 0) gainDb = 0;
+    const double g = pow(10.0, gainDb / 20);
+
+    // 3. Gain with a soft limiter: linear up to 60% of full scale, then a
+    // smooth curve that approaches (never reaches) 98%.
+    const double knee = 0.6, ceiling = 0.98;
+    for (size_t i = 0; i < n; ++i) {
+        double v = pcm[i] / 32768.0 * g;
+        const double a = fabs(v);
+        if (a > knee) {
+            const double over = (a - knee) / (ceiling - knee);
+            v = (v < 0 ? -1 : 1) * (knee + (ceiling - knee) * tanh(over));
+        }
+        pcm[i] = (int16_t)lrint(v * 32767.0);
+    }
+    return (float)gainDb;
 }

@@ -27,6 +27,8 @@ enum class VoiceCommand : int {
     Wink,
     BeCool,
     BeSilly,
+    VolumeUp,
+    VolumeDown,
     Count
 };
 
@@ -110,6 +112,12 @@ public:
         return s;
     }
     void setMuted(bool m) { muted_ = m; }
+    // "louder" / "quieter": steps to change the speaker volume by (+/-), once.
+    int takeVolumeChange() {
+        int v = volumeChange_;
+        volumeChange_ = 0;
+        return v;
+    }
     bool isMuted() const { return muted_; }
 
     // Call every frame; updates the face's expression, gaze and mouth.
@@ -162,6 +170,7 @@ private:
     uint32_t laughUntil_ = 0;
 
     bool muted_ = false;
+    int volumeChange_ = 0;
     Sfx pending_ = Sfx::None;
     Sfx playing_ = Sfx::None;   // for lip-sync
     uint32_t soundStart_ = 0;

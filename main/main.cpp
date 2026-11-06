@@ -322,6 +322,35 @@ static void drawCameraPreview() {
     canvas.pushSprite(0, 0);
 }
 
+// "Louder" / "quieter": 10 steps at a time, saved into settings.txt a few
+// seconds after the last change (so "louder... louder" writes the card once).
+static void handleVolumeChange(uint32_t now) {
+    static uint32_t saveAt = 0;
+    const int steps = buddy.takeVolumeChange();
+    if (steps != 0) {
+        const int old = config.volume;
+        config.volume = config.volume + steps * 10;
+        if (config.volume > 100) config.volume = 100;
+        if (config.volume < 10) config.volume = 10;  // "quieter" never goes silent; "be quiet" does that
+        soundSetVolume(config.volume);
+        ESP_LOGI(TAG, "volume %d%% -> %d%%%s", old, config.volume, config.volume == 100 ? " (maximum)" : "");
+        saveAt = now + 3000;
+        if (saveAt == 0) saveAt = 1;
+    }
+    if (saveAt != 0 && (int32_t)(now - saveAt) >= 0) {
+        saveAt = 0;
+        std::string text;
+        if (!sdcardMounted()) {
+            ESP_LOGW(TAG, "no SD card: the new volume lasts until restart");
+        } else if (sdcardReadFile(kSettingsFile, text) &&
+                   sdcardWriteFile(kSettingsFile, configSetValue(text, "volume", std::to_string(config.volume)))) {
+            ESP_LOGI(TAG, "saved volume = %d to settings.txt", config.volume);
+        } else {
+            ESP_LOGW(TAG, "couldn't save the volume to settings.txt");
+        }
+    }
+}
+
 static void uiTask(void*) {
     const bool proxOk = config.proximity && proximityBegin();
     proxOkFlag = proxOk;
@@ -373,7 +402,8 @@ static void uiTask(void*) {
             savedMuted = buddy.isMuted();
             settingsSetBool("muted", savedMuted);
         }
-        soundPlay(buddy.takeSound());
+        handleVolumeChange(now);
+        soundPlay(buddy.takeSound());  // after the volume change, so "louder" chirps at the new level
         if (buddy.wantsDim() != dimmed) {
             dimmed = buddy.wantsDim();
             M5.Display.setBrightness(percentTo255(dimmed ? config.dimBrightness : config.brightness));

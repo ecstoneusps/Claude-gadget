@@ -117,6 +117,12 @@ bool audioBegin() {
         ESP_LOGE(TAG, "could not open the speaker");
         return false;
     }
+    // Volume curve: the default runs 0-100 linearly over 50 dB, which leaves
+    // the small speaker quiet unless you're near 100 (85 was 7.5 dB down).
+    // Mostly use the top 16 dB instead: 50 -> -16 dB, 85 -> -5 dB, 100 -> max.
+    static esp_codec_dev_vol_map_t points[] = {{0, -45.0f}, {50, -16.0f}, {100, 0.0f}};
+    static esp_codec_dev_vol_curve_t curve = {points, 3};
+    esp_codec_dev_set_vol_curve(s_out, &curve);
     esp_codec_dev_set_out_vol(s_out, 60);
     ESP_LOGI(TAG, "full-duplex audio ready: 2 mics + speaker at %u Hz", (unsigned)kAudioSampleRate);
     return true;

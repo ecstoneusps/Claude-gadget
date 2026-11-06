@@ -61,6 +61,8 @@ compliments) are answered by the AI instead:
 | good night / go to sleep | Yawns, then sleeps and dims until "Hey Buddy", a tap, or a shake |
 | wake up | Startled awake |
 | be quiet / quiet please | Turns its sounds off (remembered after a restart) |
+| louder / speak up / turn it up / volume up / talk louder | Volume up 10 (saved to `volume` in settings.txt) |
+| quieter / turn it down / volume down / talk quieter | Volume down 10 (saved too; never below 10) |
 | sound on / you can talk | Turns its sounds back on |
 
 If it doesn't catch a command, it looks confused for a moment.

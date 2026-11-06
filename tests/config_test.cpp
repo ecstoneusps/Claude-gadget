@@ -207,6 +207,19 @@ static void test_upgrade_adds_single_missing_settings() {
     CHECK(w.empty());
 }
 
+static void test_set_value() {
+    const std::string t = "# volume = 10\nvolume                       = 63     # speaker volume, 0-100\nbrightness = 50\n";
+    const std::string u = configSetValue(t, "volume", "100");
+    CHECK(u == "# volume = 10\nvolume                       = 100    # speaker volume, 0-100\nbrightness = 50\n");
+    CHECK(configSetValue("brightness = 50", "volume", "70") == "brightness = 50\nvolume = 70\n");
+    CHECK(configSetValue("volume=5\r\nx = 1\r\n", "volume", "90") == "volume= 90\r\nx = 1\r\n");
+    CHECK(configSetValue("volume = 5 #c\n", "VOLUME", "100000") == "volume = 100000 #c\n");
+    BuddyConfig cfg;
+    std::vector<std::string> w;
+    parseConfig(configSetValue(defaultConfigText(), "volume", "85"), cfg, w);
+    CHECK(w.empty() && cfg.volume == 85);
+}
+
 static void test_duplicate_settings() {
     // You fill in a line, but the template's empty line is still further down.
     BuddyConfig cfg;
@@ -238,6 +251,7 @@ int main(int argc, char** argv) {
         {"AI settings mistakes", test_ai_settings_mistakes},
         {"older settings file is upgraded", test_upgrade_old_file},
         {"duplicate settings", test_duplicate_settings},
+        {"set a value in the file", test_set_value},
         {"upgrade adds single missing settings", test_upgrade_adds_single_missing_settings},
         {"repo copy of settings.txt matches firmware", test_repo_copy_matches_firmware_default},
     };

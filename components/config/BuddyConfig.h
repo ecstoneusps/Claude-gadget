@@ -71,3 +71,8 @@ std::string configUpgradeText(const std::string& existing);
 // "say.good_night" style key for a command, and the reverse lookup.
 std::string commandKey(VoiceCommand c);
 bool commandFromKey(const std::string& key, VoiceCommand& out);
+
+// settings.txt `text` with `key` set to `value`: the first line that sets it
+// is changed in place (its comment and alignment kept), or a line is added
+// at the end if the file doesn't set it. For settings changed by voice.
+std::string configSetValue(const std::string& text, const std::string& key, const std::string& value);

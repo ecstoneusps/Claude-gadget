@@ -591,6 +591,20 @@ static void test_no_clap_reaction_while_replying() {
     CHECK(r.expr() == Expression::Cool);
 }
 
+static void test_volume_commands() {
+    Rig r;
+    r.c.onCommand(VoiceCommand::BeQuiet, r.now);
+    r.c.onCommand(VoiceCommand::VolumeUp, r.now);
+    r.c.onCommand(VoiceCommand::VolumeUp, r.now);
+    CHECK(r.c.takeVolumeChange() == 2);
+    CHECK(r.c.takeVolumeChange() == 0);
+    CHECK(!r.c.isMuted());  // "louder" undoes "be quiet"
+    CHECK(r.c.takeSound() == Sfx::Chirp);
+    r.c.onCommand(VoiceCommand::VolumeDown, r.now);
+    CHECK(r.c.takeVolumeChange() == -1);
+    CHECK(isActionCommand(VoiceCommand::VolumeUp) && isActionCommand(VoiceCommand::VolumeDown));
+}
+
 static void test_action_commands() {
     CHECK(isActionCommand(VoiceCommand::Wink));
     CHECK(isActionCommand(VoiceCommand::GoodNight));
@@ -644,6 +658,7 @@ int main() {
         {"mouth follows speech level", test_mouth_follows_speech_level},
         {"no clap reaction while replying", test_no_clap_reaction_while_replying},
         {"action commands", test_action_commands},
+        {"volume commands", test_volume_commands},
     };
     for (auto& t : tests) {
         int before = failures;

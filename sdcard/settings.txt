@@ -25,6 +25,7 @@ two_microphones              = off    # both mics: hears you better over noise, 
 #  say.good_job  say.scold  say.thank_you  say.tell_joke  say.look_left
 #  say.look_right  say.be_happy  say.be_sad  say.be_angry  say.be_surprised
 #  say.be_quiet  say.sound_on  say.wink  say.be_cool  say.be_silly
+#  say.volume_up  say.volume_down
 # say.hello = howdy, whats up buddy
 # say.good_night = nighty night
 

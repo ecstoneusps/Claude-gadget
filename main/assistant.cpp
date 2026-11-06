@@ -349,8 +349,9 @@ static bool speak(const std::string& text) {
     }
     const size_t n = wavToMono(wav, info, kSampleRate, pcm, samples);
     heap_caps_free(wav);
-    ESP_LOGI(TAG, "speaking %.1f s (%d Hz, %d ch from Home Assistant)", n / (float)kSampleRate, info.sampleRate,
-             info.channels);
+    const float boostDb = prepareSpeech(pcm, n, kSampleRate);
+    ESP_LOGI(TAG, "speaking %.1f s (%d Hz, %d ch from Home Assistant, +%.0f dB)", n / (float)kSampleRate,
+             info.sampleRate, info.channels, boostDb);
     soundSpeak(pcm, n);
     return true;
 }

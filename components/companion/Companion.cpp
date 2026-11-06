@@ -36,6 +36,15 @@ const CommandPhrase kCommandPhrases[] = {
     // Not "be silly": on the device it was heard as "be sad".
     {VoiceCommand::BeSilly, "make a silly face"},
     {VoiceCommand::BeSilly, "act goofy"},
+    {VoiceCommand::VolumeUp, "louder"},
+    {VoiceCommand::VolumeUp, "speak up"},
+    {VoiceCommand::VolumeUp, "turn it up"},
+    {VoiceCommand::VolumeUp, "volume up"},
+    {VoiceCommand::VolumeUp, "talk louder"},
+    {VoiceCommand::VolumeDown, "quieter"},
+    {VoiceCommand::VolumeDown, "turn it down"},
+    {VoiceCommand::VolumeDown, "volume down"},
+    {VoiceCommand::VolumeDown, "talk quieter"},
 };
 const int kCommandPhraseCount = sizeof(kCommandPhrases) / sizeof(kCommandPhrases[0]);
 
@@ -61,6 +70,8 @@ const char* commandName(VoiceCommand c) {
         case VoiceCommand::Wink:        return "wink";
         case VoiceCommand::BeCool:      return "be cool";
         case VoiceCommand::BeSilly:     return "be silly";
+        case VoiceCommand::VolumeUp:    return "volume up";
+        case VoiceCommand::VolumeDown:  return "volume down";
         default:                        return "none";
     }
 }
@@ -80,6 +91,8 @@ bool isActionCommand(VoiceCommand c) {
         case VoiceCommand::Wink:
         case VoiceCommand::BeCool:
         case VoiceCommand::BeSilly:
+        case VoiceCommand::VolumeUp:
+        case VoiceCommand::VolumeDown:
             return true;
         default:
             return false;  // hello, how are you, jokes, compliments: the AI answers those
@@ -314,6 +327,13 @@ void Companion::onCommand(VoiceCommand cmd, uint32_t now) {
             react(Expression::Cool, 4000, now); play(Sfx::Boop, now); break;
         case VoiceCommand::BeSilly:
             react(Expression::Silly, 4000, now); play(Sfx::Giggle, now); break;
+        case VoiceCommand::VolumeUp:
+            // Asking for it louder also undoes "be quiet".
+            muted_ = false; ++volumeChange_;
+            react(Expression::Happy, 1500, now); play(Sfx::Chirp, now);  // played at the new volume
+            break;
+        case VoiceCommand::VolumeDown:
+            --volumeChange_; react(Expression::Relaxed, 1500, now); play(Sfx::Boop, now); break;
         default: break;
     }
 }

@@ -1,8 +1,11 @@
 // Native unit tests for the AI-conversation text and audio helpers. Run: tests/run_tests.sh
 #include <stdio.h>
+#include <math.h>
 #include <string.h>
 #include <string>
 #include <vector>
+#include <algorithm>
+#include <stdlib.h>
 
 #include "AssistText.h"
 #include "Wav.h"
@@ -147,6 +150,33 @@ static void test_wav_rejects_junk() {
     CHECK(!parseWav(t.data(), 20, info));  // truncated before the data chunk
 }
 
+static void test_prepare_speech() {
+    // Quiet 1 kHz "speech" (-30 dBFS) with a strong 60 Hz hum, then silence.
+    const int rate = 16000;
+    std::vector<int16_t> pcm(rate * 2, 0);
+    for (int i = 0; i < rate; ++i)
+        pcm[i] = (int16_t)(1000 * sin(2 * M_PI * 1000 * i / rate) + 8000 * sin(2 * M_PI * 60 * i / rate));
+    const float gain = prepareSpeech(pcm.data(), pcm.size(), rate);
+    CHECK(gain > 6.0f && gain <= 18.0f);
+    int peak = 0;
+    double hum = 0, tone = 0;
+    for (int i = rate / 4; i < rate; ++i) {
+        peak = std::max(peak, abs((int)pcm[i]));
+        hum += pcm[i] * sin(2 * M_PI * 60 * i / rate);
+        tone += pcm[i] * sin(2 * M_PI * 1000 * i / rate);
+    }
+    CHECK(peak <= 32767 * 0.98 + 1);
+    CHECK(fabs(tone) > 1.5 * fabs(hum));  // was 8x quieter than the hum before
+    for (int i = rate + rate / 4; i < 2 * rate; ++i) CHECK(abs((int)pcm[i]) < 50);  // silence stays silent
+
+    // Already loud speech isn't boosted into distortion.
+    std::vector<int16_t> loud(rate);
+    for (int i = 0; i < rate; ++i) loud[i] = (int16_t)(30000 * sin(2 * M_PI * 1000 * i / rate));
+    CHECK(prepareSpeech(loud.data(), loud.size(), rate) == 0.0f);
+    int16_t none[4] = {0, 0, 0, 0};
+    CHECK(prepareSpeech(none, 4, rate) == 0.0f);
+}
+
 int main() {
     test_split_leading_tag();
     test_split_no_tag();
@@ -161,6 +191,7 @@ int main() {
     test_wav_22k_resampled();
     test_wav_stereo_mixed();
     test_wav_rejects_junk();
+    test_prepare_speech();
     if (failures) {
         printf("assist tests: %d failure(s)\n", failures);
         return 1;
