@@ -17,6 +17,7 @@
 #include "AssistText.h"
 #include "Wav.h"
 #include "audio_io.h"
+#include "cpustats.h"
 #include "sound.h"
 #include "voice.h"
 #include "wifi.h"
@@ -238,6 +239,10 @@ static void pumpAudio() {
 
 // Downloads the reply as 16 kHz mono WAV and starts playing it. Returns false on failure.
 static bool speak(const std::string& text) {
+    static CpuWindow cpu;
+    cpu.mark();
+    const int64_t t0 = esp_timer_get_time();
+    int64_t tUrl = 0, tFirst = 0, tDone = 0;
     if (s_ttsEngine.empty()) {
         ESP_LOGW(TAG, "the voice assistant has no text-to-speech set up");
         return false;
@@ -300,6 +305,7 @@ static bool speak(const std::string& text) {
     }
 
     // Fetch the audio into PSRAM.
+    tUrl = esp_timer_get_time();
     hc = {};
     hc.url = url.c_str();
     hc.timeout_ms = 30000;
@@ -311,6 +317,7 @@ static bool speak(const std::string& text) {
     ok = wav && esp_http_client_open(http, 0) == ESP_OK;
     if (ok) {
         esp_http_client_fetch_headers(http);
+        tFirst = esp_timer_get_time();
         while (true) {
             if (len == cap) {
                 if (cap >= kMaxReplyBytes) break;  // very long: play what we have
@@ -330,6 +337,7 @@ static bool speak(const std::string& text) {
         }
     }
     esp_http_client_cleanup(http);
+    tDone = esp_timer_get_time();
 
     WavInfo info;
     if (ok && !parseWav(wav, len, info)) {
@@ -350,8 +358,13 @@ static bool speak(const std::string& text) {
     const size_t n = wavToMono(wav, info, kSampleRate, pcm, samples);
     heap_caps_free(wav);
     const float boostDb = prepareSpeech(pcm, n, kSampleRate);
+    const int64_t tProc = esp_timer_get_time();
     ESP_LOGI(TAG, "speaking %.1f s (%d Hz, %d ch from Home Assistant, +%.0f dB)", n / (float)kSampleRate,
              info.sampleRate, info.channels, boostDb);
+    ESP_LOGI(TAG, "reply audio timing: address %d ms, first byte %d ms, download %d ms (%u KB), processing %d ms",
+             (int)((tUrl - t0) / 1000), (int)((tFirst - tUrl) / 1000), (int)((tDone - tFirst) / 1000),
+             (unsigned)(len / 1024), (int)((tProc - tDone) / 1000));
+    cpu.log("cpu while fetching the reply");
     soundSpeak(pcm, n);
     return true;
 }

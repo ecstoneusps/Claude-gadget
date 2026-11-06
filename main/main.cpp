@@ -35,6 +35,7 @@
 #include "assistant.h"
 #include "audio_io.h"
 #include "camera.h"
+#include "cpustats.h"
 #include "i2c_bus.h"
 #include "proximity.h"
 #include "sdcard.h"
@@ -384,6 +385,9 @@ static void uiTask(void*) {
                      M5.Power.isCharging() ? " charging" : "", (int)M5.Power.getVBUSVoltage(),
                      (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
                      (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
+            static CpuWindow cpu;
+            if (lastStatus != 0) cpu.log("cpu last 30 s");
+            cpu.mark();
             lastStatus = now;
             frames = 0;
         }
