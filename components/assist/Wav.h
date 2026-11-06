@@ -23,8 +23,17 @@ size_t wavResampledLength(const WavInfo& info, int rate);
 // number written.
 size_t wavToMono(const uint8_t* data, const WavInfo& info, int rate, int16_t* out, size_t outCap);
 
-// Makes a spoken reply as loud and clear as the CoreS3's small speaker allows:
-// cuts the bass it can't reproduce (below ~250 Hz, which only wastes
-// loudness), raises the speech toward -12 dBFS (up to `maxGainDb`), and
-// soft-limits peaks so nothing clips. In place. Returns the gain applied, in dB.
-float prepareSpeech(int16_t* pcm, size_t n, int sampleRate, float maxGainDb = 18.0f);
+// Makes a spoken reply as loud and clear as the CoreS3's small speaker allows,
+// a piece at a time as it streams in: cuts the bass it can't reproduce (below
+// ~250 Hz, which only wastes loudness), applies a fixed gain, and soft-limits
+// peaks so nothing clips. Piper's speech measured about -17 dBFS on the
+// device, so +5 dB brings it to about -12 dBFS.
+class SpeechShaper {
+public:
+    explicit SpeechShaper(int sampleRate, float gainDb = 5.0f);
+    void process(int16_t* pcm, size_t n);  // in place; call with consecutive pieces
+
+private:
+    float b0_, b1_, b2_, a1_, a2_, gain_;
+    float x1_ = 0, x2_ = 0, y1_ = 0, y2_ = 0;
+};

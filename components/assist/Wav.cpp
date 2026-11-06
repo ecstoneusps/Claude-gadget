@@ -75,55 +75,28 @@ size_t wavToMono(const uint8_t* d, const WavInfo& w, int rate, int16_t* out, siz
 }
 
 // Single precision throughout: the ESP32-S3 has a hardware FPU for float but
-// does double in software (the first version took seconds per reply).
-float prepareSpeech(int16_t* pcm, size_t n, int sampleRate, float maxGainDb) {
-    if (n == 0 || sampleRate <= 0) return 0;
-
-    // 1. High-pass, 2nd-order Butterworth at 250 Hz.
+// does double in software.
+SpeechShaper::SpeechShaper(int sampleRate, float gainDb) {
+    // High-pass, 2nd-order Butterworth at 250 Hz.
     const float fc = 250.0f, q = 0.7071f;
-    const float w = 2.0f * (float)M_PI * fc / (float)sampleRate, cw = cosf(w), alpha = sinf(w) / (2.0f * q);
-    const float a0 = 1.0f + alpha;
-    const float b0 = (1.0f + cw) / 2.0f / a0, b1 = -(1.0f + cw) / a0, b2 = b0;
-    const float a1 = -2.0f * cw / a0, a2 = (1.0f - alpha) / a0;
-    float x1 = 0, x2 = 0, y1 = 0, y2 = 0;
-    for (size_t i = 0; i < n; ++i) {
-        const float x = pcm[i];
-        const float y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
-        x2 = x1; x1 = x; y2 = y1; y1 = y;
-        pcm[i] = (int16_t)(y > 32767.0f ? 32767.0f : y < -32768.0f ? -32768.0f : y);
-    }
+    const float w = 2.0f * (float)M_PI * fc / (float)(sampleRate > 0 ? sampleRate : 16000);
+    const float cw = cosf(w), alpha = sinf(w) / (2.0f * q), a0 = 1.0f + alpha;
+    b0_ = (1.0f + cw) / 2.0f / a0;
+    b1_ = -(1.0f + cw) / a0;
+    b2_ = b0_;
+    a1_ = -2.0f * cw / a0;
+    a2_ = (1.0f - alpha) / a0;
+    gain_ = powf(10.0f, gainDb / 20.0f) * (1.0f / 32768.0f);
+}
 
-    // 2. Loudness of the spoken parts (20 ms blocks above -50 dBFS), raised
-    // toward -12 dBFS: louder than broadcast speech, which a tiny speaker
-    // needs; the limiter below takes care of the peaks this pushes up.
-    const size_t block = (size_t)sampleRate / 50;
-    float sum = 0;
-    size_t voiced = 0;
-    for (size_t start = 0; start + block <= n; start += block) {
-        float e = 0;
-        for (size_t i = start; i < start + block; ++i) {
-            const float v = pcm[i] * (1.0f / 32768.0f);
-            e += v * v;
-        }
-        e /= (float)block;
-        if (e > 1e-5f) {  // -50 dBFS
-            sum += e;
-            ++voiced;
-        }
-    }
-    if (voiced == 0) return 0;
-    const float rms = sqrtf(sum / (float)voiced);
-    float gainDb = -12.0f - 20.0f * log10f(rms);
-    if (gainDb > maxGainDb) gainDb = maxGainDb;
-    if (gainDb < 0) gainDb = 0;
-    const float g = powf(10.0f, gainDb / 20.0f) * (1.0f / 32768.0f);
-
-    // 3. Gain with a soft limiter: linear up to 60% of full scale, then a
-    // smooth curve that approaches (never reaches) 98%. x/(1+x) instead of
-    // tanh: same shape, no transcendental function per sample.
+void SpeechShaper::process(int16_t* pcm, size_t n) {
+    // Soft limiter: linear up to 60% of full scale, then x/(1+x) toward 98%.
     const float knee = 0.6f, room = 0.98f - knee;
     for (size_t i = 0; i < n; ++i) {
-        float v = pcm[i] * g;
+        const float x = pcm[i];
+        const float y = b0_ * x + b1_ * x1_ + b2_ * x2_ - a1_ * y1_ - a2_ * y2_;
+        x2_ = x1_; x1_ = x; y2_ = y1_; y1_ = y;
+        float v = y * gain_;
         const float a = fabsf(v);
         if (a > knee) {
             const float over = (a - knee) / room;
@@ -132,5 +105,4 @@ float prepareSpeech(int16_t* pcm, size_t n, int sampleRate, float maxGainDb) {
         }
         pcm[i] = (int16_t)(v * 32767.0f + (v < 0 ? -0.5f : 0.5f));
     }
-    return gainDb;
 }

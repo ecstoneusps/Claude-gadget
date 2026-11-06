@@ -8,6 +8,8 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
+#include "freertos/stream_buffer.h"
 
 #include "audio_io.h"
 
@@ -23,8 +25,9 @@ static std::atomic<int> s_request{(int)Sfx::None};
 static std::atomic<bool> s_playing{false};
 static std::atomic<int64_t> s_lastSoundUs{0};
 
-static std::atomic<int16_t*> s_speech{nullptr};
-static std::atomic<size_t> s_speechLen{0};
+static StreamBufferHandle_t s_speechBuf = nullptr;
+static std::atomic<bool> s_speechStart{false};  // a reply began; the player should pick it up
+static std::atomic<bool> s_speechOpen{false};   // more pieces may still come
 static std::atomic<bool> s_speaking{false};
 static std::atomic<bool> s_stopSpeech{false};
 static std::atomic<float> s_speechLevel{0};
@@ -40,23 +43,21 @@ static float chunkLevel(const int16_t* p, int n) {
 }
 
 static bool playSpeech() {
-    constexpr int kChunk = 256;
-    int16_t* pcm = s_speech.exchange(nullptr);
-    if (!pcm) return false;
-    s_stopSpeech.store(false);  // a stop meant for an earlier reply
-    size_t left = s_speechLen.load();
-    s_speaking.store(true);
+    if (!s_speechStart.exchange(false)) return false;
     s_playing.store(true);
-    const int16_t* p = pcm;
-    while (left > 0 && !s_stopSpeech.load()) {
-        const int n = left < (size_t)kChunk ? (int)left : kChunk;
-        s_speechLevel.store(chunkLevel(p, n));
-        audioWrite(p, n);
-        p += n;
-        left -= n;
+    int16_t buf[256];  // 16 ms
+    while (!s_stopSpeech.load()) {
+        const size_t got = xStreamBufferReceive(s_speechBuf, buf, sizeof buf, pdMS_TO_TICKS(20));
+        if (got == 0) {
+            if (!s_speechOpen.load() && xStreamBufferIsEmpty(s_speechBuf)) break;  // all played
+            s_speechLevel.store(0);  // waiting for more (the speaker plays silence meanwhile)
+            continue;
+        }
+        const int n = (int)(got / sizeof(int16_t));
+        s_speechLevel.store(chunkLevel(buf, n));
+        audioWrite(buf, n);
         s_lastSoundUs.store(esp_timer_get_time());
     }
-    heap_caps_free(pcm);
     s_speechLevel.store(0);
     s_speaking.store(false);
     return true;
@@ -74,7 +75,7 @@ static void playerTask(void*) {
             s_playing.store(true);
             const int16_t* pcm = s_pcm[req];
             size_t left = s_len[req];
-            while (left > 0 && s_request.load() == (int)Sfx::None && !s_speech.load()) {
+            while (left > 0 && s_request.load() == (int)Sfx::None && !s_speechStart.load()) {
                 const int n = left < (size_t)kChunk ? (int)left : kChunk;
                 audioWrite(pcm, n);
                 pcm += n;
@@ -102,6 +103,7 @@ void soundInit() {
         sfxRender(s, s_pcm[i]);
         total += s_len[i] * sizeof(int16_t);
     }
+    s_speechBuf = xStreamBufferCreateWithCaps(kAudioSampleRate * 2 * 8, 2, MALLOC_CAP_SPIRAM);  // 8 s
     // Core 1 next to the UI; it mostly waits on the I2S DMA.
     xTaskCreatePinnedToCore(playerTask, "sound", 3072, nullptr, 5, &s_player, 1);
     ESP_LOGI(TAG, "rendered %d effects, %u KB", (int)Sfx::Count - 1, (unsigned)(total / 1024));
@@ -110,7 +112,7 @@ void soundInit() {
 void soundSetVolume(int percent) { audioSetVolume(percent); }
 
 void soundPlay(Sfx s) {
-    if (s == Sfx::None || s_len[(int)s] == 0 || !s_player || s_speaking.load() || s_speech.load()) return;
+    if (s == Sfx::None || s_len[(int)s] == 0 || !s_player || s_speaking.load()) return;
     s_request.store((int)s);
     xTaskNotifyGive(s_player);
 }
@@ -119,26 +121,39 @@ bool soundHeardRecently(uint32_t tailMs) {
     return s_playing.load() || esp_timer_get_time() - s_lastSoundUs.load() < (int64_t)tailMs * 1000;
 }
 
-void soundSpeak(int16_t* pcm, size_t samples) {
-    if (!s_player || !pcm || samples == 0) {
-        heap_caps_free(pcm);
-        return;
-    }
-    s_speechLen.store(samples);
-    int16_t* old = s_speech.exchange(pcm);
-    if (old) heap_caps_free(old);  // an unplayed earlier reply
-    s_speaking.store(true);        // from now on, so callers waiting for the end don't miss it
+void soundSpeechBegin() {
+    if (!s_player || !s_speechBuf) return;
+    // The previous reply has finished (callers wait for soundSpeaking() to
+    // go false), so nothing is blocked on the buffer and it can be reset.
+    s_stopSpeech.store(false);
+    xStreamBufferReset(s_speechBuf);
+    s_speechOpen.store(true);
+    s_speaking.store(true);
+    s_speechStart.store(true);
     xTaskNotifyGive(s_player);
 }
 
-void soundStopSpeech() {
-    int16_t* pending = s_speech.exchange(nullptr);
-    if (pending) {
-        heap_caps_free(pending);
-        s_speaking.store(false);
+void soundSpeechWrite(const int16_t* pcm, size_t samples) {
+    if (!s_speechBuf || !s_speechOpen.load()) return;
+    const uint8_t* p = (const uint8_t*)pcm;
+    size_t left = samples * sizeof(int16_t);
+    while (left > 0 && !s_stopSpeech.load()) {
+        const size_t sent = xStreamBufferSend(s_speechBuf, p, left, pdMS_TO_TICKS(100));
+        p += sent;
+        left -= sent;
     }
+}
+
+void soundSpeechEnd() { s_speechOpen.store(false); }
+
+size_t soundSpeechQueued() {
+    return s_speechBuf ? xStreamBufferBytesAvailable(s_speechBuf) / sizeof(int16_t) : 0;
+}
+
+void soundStopSpeech() {
+    s_speechOpen.store(false);
     if (s_speaking.load()) s_stopSpeech.store(true);
 }
 
-bool soundSpeaking() { return s_speaking.load() || s_speech.load() != nullptr; }
+bool soundSpeaking() { return s_speaking.load(); }
 float soundSpeechLevel() { return s_speechLevel.load(); }

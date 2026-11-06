@@ -150,14 +150,24 @@ static void test_wav_rejects_junk() {
     CHECK(!parseWav(t.data(), 20, info));  // truncated before the data chunk
 }
 
-static void test_prepare_speech() {
-    // Quiet 1 kHz "speech" (-30 dBFS) with a strong 60 Hz hum, then silence.
+static void test_speech_shaper() {
+    // 1 kHz "speech" with a strong 60 Hz hum, then silence.
     const int rate = 16000;
     std::vector<int16_t> pcm(rate * 2, 0);
     for (int i = 0; i < rate; ++i)
-        pcm[i] = (int16_t)(1000 * sin(2 * M_PI * 1000 * i / rate) + 8000 * sin(2 * M_PI * 60 * i / rate));
-    const float gain = prepareSpeech(pcm.data(), pcm.size(), rate);
-    CHECK(gain > 6.0f && gain <= 18.0f);
+        pcm[i] = (int16_t)(3000 * sin(2 * M_PI * 1000 * i / rate) + 8000 * sin(2 * M_PI * 60 * i / rate));
+    std::vector<int16_t> whole = pcm;
+    SpeechShaper(rate).process(whole.data(), whole.size());
+
+    // Processing in odd-sized pieces, as it streams in, gives the same result.
+    SpeechShaper pieces(rate);
+    for (size_t at = 0; at < pcm.size();) {
+        const size_t n = std::min<size_t>(777, pcm.size() - at);
+        pieces.process(pcm.data() + at, n);
+        at += n;
+    }
+    CHECK(pcm == whole);
+
     int peak = 0;
     double hum = 0, tone = 0;
     for (int i = rate / 4; i < rate; ++i) {
@@ -166,22 +176,22 @@ static void test_prepare_speech() {
         tone += pcm[i] * sin(2 * M_PI * 1000 * i / rate);
     }
     CHECK(peak <= 32767 * 0.98 + 1);
-    CHECK(fabs(tone) > 1.5 * fabs(hum));  // was 8x quieter than the hum before
+    CHECK(fabs(tone) > 2 * fabs(hum));  // the hum was 2.7x louder than the tone before
     for (int i = rate + rate / 4; i < 2 * rate; ++i) CHECK(abs((int)pcm[i]) < 50);  // silence stays silent
 
-    // Already loud speech isn't boosted into distortion.
-    std::vector<int16_t> loud(rate);
-    for (int i = 0; i < rate; ++i) loud[i] = (int16_t)(30000 * sin(2 * M_PI * 1000 * i / rate));
-    CHECK(prepareSpeech(loud.data(), loud.size(), rate) == 0.0f);
-    for (int i = rate / 4; i < rate; ++i) CHECK(abs((int)loud[i]) <= 32767 * 0.98 + 1);
-
-    // Typical synthesized speech level (-17 dBFS) gets a few dB louder.
+    // +5 dB on a moderate tone (below the limiter's knee).
     std::vector<int16_t> mid(rate);
-    for (int i = 0; i < rate; ++i) mid[i] = (int16_t)(6550 * sin(2 * M_PI * 800 * i / rate));
-    const float g2 = prepareSpeech(mid.data(), mid.size(), rate);
-    CHECK(g2 > 3.0f && g2 < 7.0f);
-    int16_t none[4] = {0, 0, 0, 0};
-    CHECK(prepareSpeech(none, 4, rate) == 0.0f);
+    for (int i = 0; i < rate; ++i) mid[i] = (int16_t)(6000 * sin(2 * M_PI * 1000 * i / rate));
+    SpeechShaper(rate).process(mid.data(), mid.size());
+    int midPeak = 0;
+    for (int i = rate / 2; i < rate; ++i) midPeak = std::max(midPeak, abs((int)mid[i]));
+    CHECK(midPeak > 10000 && midPeak < 11500);  // 6000 * 1.78 = 10670
+
+    // A full-scale tone is limited, not clipped.
+    std::vector<int16_t> loud(rate);
+    for (int i = 0; i < rate; ++i) loud[i] = (int16_t)(32000 * sin(2 * M_PI * 1000 * i / rate));
+    SpeechShaper(rate).process(loud.data(), loud.size());
+    for (int i = 0; i < rate; ++i) CHECK(abs((int)loud[i]) <= 32767 * 0.98 + 1);
 }
 
 int main() {
@@ -198,7 +208,7 @@ int main() {
     test_wav_22k_resampled();
     test_wav_stereo_mixed();
     test_wav_rejects_junk();
-    test_prepare_speech();
+    test_speech_shaper();
     if (failures) {
         printf("assist tests: %d failure(s)\n", failures);
         return 1;

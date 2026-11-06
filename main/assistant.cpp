@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <string.h>
+#include <vector>
 
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
@@ -29,7 +30,6 @@ static constexpr uint32_t kRunStartMs = 8000;      // Home Assistant to accept t
 static constexpr uint32_t kSttMs = 20000;          // speech-to-text after you stop talking
 static constexpr uint32_t kIntentMs = 90000;       // the AI's answer (a cold model can take a while)
 static constexpr uint32_t kConversationMs = 300000;  // keep the same conversation (memory) this long
-static constexpr size_t kMaxReplyBytes = 4 * 1024 * 1024;  // ~2 minutes of 16 kHz speech
 
 static AssistantConfig s_cfg;
 static QueueHandle_t s_events = nullptr;
@@ -243,6 +243,7 @@ static bool speak(const std::string& text) {
     cpu.mark();
     const int64_t t0 = esp_timer_get_time();
     int64_t tUrl = 0, tFirst = 0, tDone = 0;
+    (void)tDone;
     if (s_ttsEngine.empty()) {
         ESP_LOGW(TAG, "the voice assistant has no text-to-speech set up");
         return false;
@@ -304,68 +305,117 @@ static bool speak(const std::string& text) {
         return false;
     }
 
-    // Fetch the audio into PSRAM.
+    // Fetch the audio and play it as it arrives. Home Assistant streams it
+    // while Piper speaks, but sometimes takes far longer to mark the end than
+    // to send the sound (30+ s seen on hardware), so once everything that came
+    // has been played and nothing new arrives for a couple of seconds, the
+    // reply counts as finished.
     tUrl = esp_timer_get_time();
     hc = {};
     hc.url = url.c_str();
-    hc.timeout_ms = 30000;
+    hc.timeout_ms = 15000;  // for the first byte
     hc.buffer_size = 4096;
     hc.crt_bundle_attach = esp_crt_bundle_attach;
     http = esp_http_client_init(&hc);
-    size_t cap = 256 * 1024, len = 0;
-    uint8_t* wav = (uint8_t*)heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
-    ok = wav && esp_http_client_open(http, 0) == ESP_OK;
-    if (ok) {
-        esp_http_client_fetch_headers(http);
-        tFirst = esp_timer_get_time();
-        while (true) {
-            if (len == cap) {
-                if (cap >= kMaxReplyBytes) break;  // very long: play what we have
-                uint8_t* bigger = (uint8_t*)heap_caps_realloc(wav, cap * 2, MALLOC_CAP_SPIRAM);
-                if (!bigger) break;
-                wav = bigger;
-                cap *= 2;
-            }
-            const int n = esp_http_client_read(http, (char*)wav + len, cap - len);
-            if (n <= 0) break;
-            len += n;
+    if (esp_http_client_open(http, 0) != ESP_OK || esp_http_client_fetch_headers(http) < 0 ||
+        esp_http_client_get_status_code(http) != 200) {
+        ESP_LOGW(TAG, "speech download failed (HTTP %d)", esp_http_client_get_status_code(http));
+        esp_http_client_cleanup(http);
+        return false;
+    }
+    tFirst = esp_timer_get_time();
+    constexpr int kPollMs = 250;
+    constexpr int kQuietEndMs = 2000;
+    esp_http_client_set_timeout_ms(http, kPollMs);
+
+    static uint8_t* buf = (uint8_t*)heap_caps_malloc(4096 + 2, MALLOC_CAP_SPIRAM);
+    std::vector<uint8_t> head;  // until the WAV header has been read
+    WavInfo info;
+    bool streaming = false;
+    SpeechShaper shaper(kSampleRate);
+    uint8_t carry = 0;
+    bool haveCarry = false;  // an odd byte left over between reads
+    size_t total = 0, samplesOut = 0;
+    int quietMs = 0;
+    const char* ending = "finished";
+    ok = buf != nullptr;
+    auto play = [&](const uint8_t* data, size_t len) {
+        // Whole 16-bit samples only; keep an odd byte for next time.
+        uint8_t* p = buf;
+        size_t n = 0;
+        if (haveCarry && len > 0) {
+            p[n++] = carry;
+            haveCarry = false;
         }
-        const int status = esp_http_client_get_status_code(http);
-        if (status != 200) {
-            ESP_LOGW(TAG, "speech download failed: HTTP %d", status);
-            ok = false;
+        memmove(p + n, data, len);
+        n += len;
+        if (n & 1) {
+            carry = p[n - 1];
+            haveCarry = true;
+            --n;
+        }
+        int16_t* pcm = (int16_t*)p;
+        shaper.process(pcm, n / 2);
+        soundSpeechWrite(pcm, n / 2);
+        samplesOut += n / 2;
+    };
+
+    while (ok) {
+        const int n = esp_http_client_read(http, (char*)buf, 4096);
+        if (n > 0) {
+            total += n;
+            quietMs = 0;
+            if (streaming) {
+                play(buf, n);
+                continue;
+            }
+            head.insert(head.end(), buf, buf + n);
+            if (!parseWav(head.data(), head.size(), info)) {
+                if (head.size() > 65536) {
+                    ESP_LOGW(TAG, "speech isn't a 16-bit WAV (starts %02x %02x %02x %02x)", head[0], head[1],
+                             head[2], head[3]);
+                    ok = false;
+                }
+                continue;
+            }
+            if (info.sampleRate != kSampleRate || info.channels != 1) {
+                ESP_LOGW(TAG, "speech is %d Hz, %d channels; expected 16000 Hz mono", info.sampleRate,
+                         info.channels);
+                ok = false;
+                break;
+            }
+            streaming = true;
+            soundSpeechBegin();
+            play(head.data() + info.dataOffset, head.size() - info.dataOffset);
+            std::vector<uint8_t>().swap(head);
+        } else if (n == 0) {
+            break;  // Home Assistant marked the end
+        } else if (n == -ESP_ERR_HTTP_EAGAIN) {
+            quietMs += kPollMs;
+            if (streaming && quietMs >= kQuietEndMs && soundSpeechQueued() == 0) {
+                ending = "nothing new for 2 s";
+                break;
+            }
+            if (quietMs >= 30000) {
+                ending = "timed out";
+                break;
+            }
+        } else {
+            ending = "connection error";
+            break;
         }
     }
     esp_http_client_cleanup(http);
+    if (streaming) soundSpeechEnd();
     tDone = esp_timer_get_time();
-
-    WavInfo info;
-    if (ok && !parseWav(wav, len, info)) {
-        ESP_LOGW(TAG, "speech isn't a 16-bit WAV (%u bytes, starts %02x %02x %02x %02x)", (unsigned)len,
-                 len > 0 ? wav[0] : 0, len > 1 ? wav[1] : 0, len > 2 ? wav[2] : 0, len > 3 ? wav[3] : 0);
-        ok = false;
-    }
-    if (!ok) {
-        heap_caps_free(wav);
+    if (!streaming) {
+        if (ok) ESP_LOGW(TAG, "no speech audio received");
         return false;
     }
-    const size_t samples = wavResampledLength(info, kSampleRate);
-    int16_t* pcm = (int16_t*)heap_caps_malloc(samples * 2 + 2, MALLOC_CAP_SPIRAM);
-    if (!pcm) {
-        heap_caps_free(wav);
-        return false;
-    }
-    const size_t n = wavToMono(wav, info, kSampleRate, pcm, samples);
-    heap_caps_free(wav);
-    const float boostDb = prepareSpeech(pcm, n, kSampleRate);
-    const int64_t tProc = esp_timer_get_time();
-    ESP_LOGI(TAG, "speaking %.1f s (%d Hz, %d ch from Home Assistant, +%.0f dB)", n / (float)kSampleRate,
-             info.sampleRate, info.channels, boostDb);
-    ESP_LOGI(TAG, "reply audio timing: address %d ms, first byte %d ms, download %d ms (%u KB), processing %d ms",
-             (int)((tUrl - t0) / 1000), (int)((tFirst - tUrl) / 1000), (int)((tDone - tFirst) / 1000),
-             (unsigned)(len / 1024), (int)((tProc - tDone) / 1000));
+    ESP_LOGI(TAG, "spoke %.1f s; audio address %d ms, first byte %d ms, then %d ms of streaming (%u KB, ended: %s)",
+             samplesOut / (float)kSampleRate, (int)((tUrl - t0) / 1000), (int)((tFirst - tUrl) / 1000),
+             (int)((tDone - tFirst) / 1000), (unsigned)(total / 1024), ending);
     cpu.log("cpu while fetching the reply");
-    soundSpeak(pcm, n);
     return true;
 }
 
