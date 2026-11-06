@@ -175,6 +175,10 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
             if (!parseBool(val, cfg.proximity)) bad("must be on or off");
         } else if (key == "proximity_sensitivity") {
             if (!parseInt(val, 1, 2000, cfg.proximitySensitivity)) bad("must be 1-2000");
+        } else if (key == "radar") {
+            if (!parseBool(val, cfg.radar)) bad("must be on or off");
+        } else if (key == "radar_distance_cm") {
+            if (!parseInt(val, 30, 600, cfg.radarDistanceCm)) bad("must be 30-600");
         } else if (key == "flip_tilt_x") {
             if (!parseBool(val, cfg.flipTiltX)) bad("must be on or off");
         } else if (key == "flip_tilt_y") {
@@ -417,6 +421,10 @@ std::string defaultConfigText() {
     add("# --- Proximity sensor (above the screen) ---");
     onoff("proximity", d.proximity, "wake up when you sit down");
     num("proximity_sensitivity", d.proximitySensitivity, "lower notices you from further away (but more false alarms)");
+    add("");
+    add("# --- Presence radar (LD2410, plugged into Port C) ---");
+    onoff("radar", d.radar, "use the radar when one is plugged in (instead of the proximity sensor)");
+    num("radar_distance_cm", d.radarDistanceCm, "how close (cm) counts as sitting at the desk, 30-600");
     add("");
     add("# --- Motion ---");
     onoff("flip_tilt_x", d.flipTiltX, "turn on if tilting left/right makes the eyes go the wrong way");

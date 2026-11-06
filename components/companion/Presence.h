@@ -32,3 +32,24 @@ private:
     uint32_t nearSince_ = 0, farSince_ = 0, presentSince_ = 0;
     bool near_ = false;
 };
+
+// Someone at the desk, from a presence radar (LD2410) instead of the
+// short-range proximity sensor: it notices you sitting still, a few metres
+// away. Only people within `maxDistanceCm` count as being at the desk.
+class RadarPresence {
+public:
+    enum class Event { None, Arrived, Left };
+
+    // Each radar reading: is someone there, and how far (cm, nearest target).
+    Event update(bool someone, int distanceCm, uint32_t now);
+    bool present() const { return present_; }
+
+    int maxDistanceCm = 150;
+    uint32_t arriveMs = 800;   // seen this long before counting as arrived
+    uint32_t leaveMs = 8000;   // gone this long before counting as left (the radar blinks out briefly)
+
+private:
+    bool present_ = false;
+    bool near_ = false;
+    uint32_t since_ = 0;  // when `near_` last changed
+};

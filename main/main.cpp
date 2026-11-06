@@ -7,6 +7,7 @@
 //   main/audio_io.cpp     full-duplex audio: both mics + speaker at once
 //   main/sound.cpp        sound effects through the speaker
 //   main/proximity.cpp    proximity sensor: notices you sitting down
+//   main/radar.cpp        LD2410 presence radar on Port C (optional; better at it)
 //   main/camera.cpp       camera + face detection: looks at you
 //   main/settings.cpp     settings kept across restarts (mute)
 //   main/sdcard.cpp       microSD card; settings.txt is read from it at startup
@@ -38,6 +39,7 @@
 #include "cpustats.h"
 #include "i2c_bus.h"
 #include "proximity.h"
+#include "radar.h"
 #include "sdcard.h"
 #include "settings.h"
 #include "sound.h"
@@ -131,6 +133,44 @@ static void handleImu(uint32_t now) {
 // Proximity: greet you when you sit down, doze sooner when you leave.
 // Logs the raw reading every 10 s so the thresholds can be tuned.
 static PresenceDetector presence;
+
+static RadarPresence radarPresence;
+
+// Presence radar (when one is plugged in): takes over from the proximity
+// sensor, since it notices you sitting still and further away.
+static bool handleRadar(uint32_t now) {
+    if (!config.radar) return false;
+    radarPoll(now);
+    if (!radarFound()) return false;
+    static uint32_t lastLog = 0;
+    const RadarReading& r = radarLatest();
+    const bool fresh = radarFresh(now);
+    const int cm = r.nearestCm();
+    switch (radarPresence.update(fresh && r.someone(), cm, now)) {
+        case RadarPresence::Event::Arrived:
+            ESP_LOGI(TAG, "someone's here (radar: %d cm)", cm);
+            buddy.onArrived(now);
+            break;
+        case RadarPresence::Event::Left:
+            ESP_LOGI(TAG, "they left (radar)");
+            buddy.onLeft(now);
+            break;
+        default:
+            break;
+    }
+    if (now - lastLog > 10000) {
+        lastLog = now;
+        static const char* const kStates[] = {"nobody", "moving", "still", "moving + still"};
+        if (!fresh) {
+            ESP_LOGW(TAG, "radar: no readings for a while (unplugged?)");
+        } else {
+            ESP_LOGI(TAG, "radar: %s, nearest %d cm (moving %u cm/%u%%, still %u cm/%u%%), %s", kStates[r.state & 3],
+                     cm, r.movingCm, r.movingEnergy, r.stillCm, r.stillEnergy,
+                     radarPresence.present() ? "at the desk" : "not at the desk");
+        }
+    }
+    return true;
+}
 
 static void handleProximity(uint32_t now, bool sensorOk) {
     static uint32_t lastRead = 0, lastLog = 0;
@@ -281,6 +321,7 @@ static void loadSettings() {
     buddy.dimAfterMs = config.dimAfterSeconds * 1000u;
     buddy.sleepAfterLeftMs = config.sleepAfterLeavingSeconds * 1000u;
     presence.minRise = (float)config.proximitySensitivity;
+    radarPresence.maxDistanceCm = config.radarDistanceCm;
     ESP_LOGI(TAG, "volume %d%%, brightness %d%%, sleep after %ds, face tracking %s, proximity %s",
              config.volume, config.brightness, config.sleepAfterSeconds,
              config.faceTracking ? "on" : "off", config.proximity ? "on" : "off");
@@ -355,6 +396,7 @@ static void handleVolumeChange(uint32_t now) {
 
 static void uiTask(void*) {
     const bool proxOk = config.proximity && proximityBegin();
+    if (config.radar) radarBegin();
     proxOkFlag = proxOk;
     uint32_t lastStatus = 0, frames = 0;
     uint32_t lastFrame = nowMs(), lastBattery = 0, lastImu = 0;
@@ -369,19 +411,21 @@ static void uiTask(void*) {
         }
         handleVoice(now);
         handleAssistant(now);
-        handleProximity(now, proxOk);
+        if (!handleRadar(now)) handleProximity(now, proxOk);
         handleFace(now);
 
         // One-line health summary every 30 s, so a log opened at any time
         // shows what started (the USB monitor disconnects on every reset).
         if (lastStatus == 0 || now - lastStatus > 30000) {
             ESP_LOGI(TAG, "status: %d fps, audio %s, voice %s (%s), wifi %s, ai %s, sd %s, camera %s, "
-                          "proximity %s, battery %d%%%s, usb %d mV, free PSRAM %u KB, free internal %u KB",
+                          "proximity %s, radar %s, battery %d%%%s, usb %d mV, free PSRAM %u KB, free internal %u KB",
                      (int)(frames * 1000 / (now - lastStatus + 1)),
                      audioOk ? "ok" : "FAILED", voiceOk.load() ? "ready" : "not ready", voiceFrontEnd(),
                      wifiStatus(), aiStarted.load() ? assistantStatus() : "off",
                      sdcardMounted() ? "ok" : "none", cameraOkFlag ? "ok" : "off/FAILED",
-                     proxOkFlag ? "ok" : "off/FAILED", (int)M5.Power.getBatteryLevel(),
+                     proxOkFlag ? "ok" : "off/FAILED",
+                     !config.radar ? "off" : radarFresh(now) ? "ok" : radarFound() ? "LOST" : "none",
+                     (int)M5.Power.getBatteryLevel(),
                      M5.Power.isCharging() ? " charging" : "", (int)M5.Power.getVBUSVoltage(),
                      (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
                      (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));

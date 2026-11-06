@@ -16,3 +16,7 @@ g++ -std=c++17 -Wall -Wextra -Werror -Icomponents/face -Icomponents/companion -I
 g++ -std=c++17 -Wall -Wextra -Werror -Icomponents/assist \
     tests/assist_test.cpp components/assist/AssistText.cpp components/assist/Wav.cpp -o "$OUT.assist"
 "$OUT.assist"
+
+g++ -std=c++17 -Wall -Wextra -Werror -Icomponents/ld2410 -Icomponents/companion -Icomponents/face -Icomponents/sfx \
+    tests/radar_test.cpp components/ld2410/Ld2410.cpp components/companion/Presence.cpp -o "$OUT.radar"
+"$OUT.radar"

@@ -148,6 +148,28 @@ on the device: 5 frames a second while awake, 1 while dozing, and none after
 the device and are never stored.** Each frame is analyzed in memory and
 discarded. The serial log prints the face position every few seconds.
 
+## Presence radar (optional)
+
+An HLK-LD2410 / LD2410B / LD2410C 24 GHz radar module makes "someone sat
+down / they left" far more reliable than the built-in proximity sensor: it
+notices you sitting perfectly still, a metre or two away, and it sees through
+thin plastic, so it can hide inside a printed body.
+
+Wire it to **Port C** (the blue Grove port) with a Grove-to-female-jumper cable:
+
+| Grove wire | Port C | LD2410 pin |
+|---|---|---|
+| red | 5 V | VCC |
+| black | GND | GND |
+| yellow | GPIO 18 (Buddy receives) | TX |
+| white | GPIO 17 (Buddy sends) | RX |
+
+If the yellow and white wires end up the other way round, the buddy notices
+and swaps them in software. When a radar is detected it takes over from the
+proximity sensor; the log shows `radar: still, nearest 82 cm ...` every 10
+seconds, and `radar_distance_cm` in settings.txt sets how close counts as at
+the desk.
+
 ## Project layout
 
 ```
@@ -160,6 +182,7 @@ main/audio_io.cpp      Full-duplex audio: ES7210 mics + AW88298 speaker amp on o
 main/sound.cpp         Sound effect player task (streams to the speaker while the mics listen)
 main/i2c_bus.cpp       The shared internal I2C bus (M5Unified, camera and audio chips)
 main/proximity.cpp     LTR-553 proximity sensor driver (presence logic is in components/companion/Presence.*)
+main/radar.cpp         LD2410 presence radar on Port C (frame parser: components/ld2410, portable)
 main/camera.cpp        Camera setup and face detection task
 main/settings.cpp      Settings kept across restarts in flash (NVS): currently mute
 main/sdcard.cpp        microSD card (shares the display's SPI bus)
@@ -248,6 +271,7 @@ and restart the buddy.
 | `face_model` | `fast` (MSR+MNP, default) checks about 14 times a second; `accurate` (ESPDet-Pico) finds you more often per check but takes ~0.5 s each and slows the animation |
 | `camera_preview` | Show what the camera sees, with a green box around a detected face (for troubleshooting) |
 | `proximity`, `proximity_sensitivity` | Proximity sensor on/off; lower sensitivity numbers notice you from further away |
+| `radar`, `radar_distance_cm` | Use an LD2410 presence radar on Port C (see below); how close counts as at the desk |
 | `flip_tilt_x`, `flip_tilt_y` | Fix tilt reactions that go the wrong way |
 | `wifi_name`, `wifi_password` | Your Wi-Fi (2.4 GHz). Put the password in "quotes" if it contains a `#` |
 | `ha_url` | Home Assistant's address with its IP and port, e.g. `http://192.168.1.20:8123` (`.local` names don't work) |

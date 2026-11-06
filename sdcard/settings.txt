@@ -40,6 +40,10 @@ camera_preview               = off    # show what the camera sees (green box = f
 proximity                    = on     # wake up when you sit down
 proximity_sensitivity        = 25     # lower notices you from further away (but more false alarms)
 
+# --- Presence radar (LD2410, plugged into Port C) ---
+radar                        = on     # use the radar when one is plugged in (instead of the proximity sensor)
+radar_distance_cm            = 150    # how close (cm) counts as sitting at the desk, 30-600
+
 # --- Motion ---
 flip_tilt_x                  = off    # turn on if tilting left/right makes the eyes go the wrong way
 flip_tilt_y                  = off    # same for tilting forward/back

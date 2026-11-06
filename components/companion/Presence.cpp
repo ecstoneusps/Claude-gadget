@@ -39,3 +39,20 @@ PresenceDetector::Event PresenceDetector::update(uint16_t raw, uint32_t now) {
     }
     return Event::None;
 }
+
+RadarPresence::Event RadarPresence::update(bool someone, int distanceCm, uint32_t now) {
+    const bool near = someone && distanceCm > 0 && distanceCm <= maxDistanceCm;
+    if (near != near_) {
+        near_ = near;
+        since_ = now;
+    }
+    if (!present_ && near_ && now - since_ >= arriveMs) {
+        present_ = true;
+        return Event::Arrived;
+    }
+    if (present_ && !near_ && now - since_ >= leaveMs) {
+        present_ = false;
+        return Event::Left;
+    }
+    return Event::None;
+}

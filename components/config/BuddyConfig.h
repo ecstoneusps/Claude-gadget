@@ -37,6 +37,10 @@ struct BuddyConfig {
     bool proximity = true;
     int proximitySensitivity = 25; // counts above the empty-desk level; lower = more sensitive
 
+    // Presence radar (LD2410 on Port C)
+    bool radar = true;             // used when one is plugged in; off ignores it
+    int radarDistanceCm = 150;     // how close counts as "at the desk"
+
     // Motion
     bool flipTiltX = false;
     bool flipTiltY = false;

@@ -33,6 +33,7 @@ static void test_default_file_round_trips() {
     CHECK(cfg.faceGaze > 1.39f && cfg.faceGaze < 1.41f);
     CHECK(cfg.proximity == d.proximity && cfg.proximitySensitivity == d.proximitySensitivity);
     CHECK(cfg.flipTiltX == d.flipTiltX && cfg.flipTiltY == d.flipTiltY);
+    CHECK(cfg.radar && cfg.radarDistanceCm == 150);
     CHECK(cfg.extraPhrases.empty());  // examples are commented out
     CHECK(cfg.wifiName.empty() && cfg.wifiPassword.empty() && cfg.haUrl.empty() && cfg.haToken.empty());
     CHECK(cfg.haPipeline == "Buddy");
@@ -220,6 +221,14 @@ static void test_set_value() {
     CHECK(w.empty() && cfg.volume == 85);
 }
 
+static void test_radar_settings() {
+    BuddyConfig cfg;
+    std::vector<std::string> w;
+    parseConfig("radar = off\nradar_distance_cm = 90\nradar_distance_cm = 5\n", cfg, w);
+    CHECK(!cfg.radar && cfg.radarDistanceCm == 90);
+    CHECK(w.size() == 2);  // "set again" and "must be 30-600"
+}
+
 static void test_duplicate_settings() {
     // You fill in a line, but the template's empty line is still further down.
     BuddyConfig cfg;
@@ -251,6 +260,7 @@ int main(int argc, char** argv) {
         {"AI settings mistakes", test_ai_settings_mistakes},
         {"older settings file is upgraded", test_upgrade_old_file},
         {"duplicate settings", test_duplicate_settings},
+        {"radar settings", test_radar_settings},
         {"set a value in the file", test_set_value},
         {"upgrade adds single missing settings", test_upgrade_adds_single_missing_settings},
         {"repo copy of settings.txt matches firmware", test_repo_copy_matches_firmware_default},
