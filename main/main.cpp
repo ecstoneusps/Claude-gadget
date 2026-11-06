@@ -256,10 +256,13 @@ static void loadSettings() {
     if (sdcardMount()) {
         std::string text;
         if (sdcardReadFile(kSettingsFile, text)) {
-            // Written by an older version: add the settings it doesn't have yet.
+            // Written by an older version: add the settings it doesn't have yet
+            // (at their defaults, at the end of the file).
             const std::string extra = configUpgradeText(text);
             if (!extra.empty() && sdcardWriteFile(kSettingsFile, text + extra)) {
-                ESP_LOGI(TAG, "added the new settings (Wi-Fi, Home Assistant) to settings.txt");
+                int added = 0;
+                for (size_t p = 0; (p = extra.find(" = ", p)) != std::string::npos; ++p) ++added;
+                ESP_LOGI(TAG, "added %d new setting%s to the end of settings.txt", added, added == 1 ? "" : "s");
                 text += extra;
             }
             std::vector<std::string> warnings;

@@ -260,13 +260,90 @@ void addAiSection(std::string& t) {
 }
 }  // namespace
 
+namespace {
+// The setting a line is about: "volume = 40" and "# volume = 40" both give
+// "volume" (a commented-out setting counts as present: you chose the default).
+// "" for anything else, including the say.* examples.
+std::string settingKeyOf(const std::string& rawLine) {
+    std::string line = trim(rawLine);
+    while (!line.empty() && line[0] == '#') line = trim(line.substr(1));
+    const size_t eq = line.find('=');
+    if (eq == std::string::npos) return "";
+    const std::string key = lower(trim(line.substr(0, eq)));
+    if (key.empty() || key.rfind("say.", 0) == 0) return "";
+    for (char c : key)
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) return "";
+    return key;
+}
+
+std::vector<std::string> splitLines(const std::string& text) {
+    std::vector<std::string> lines;
+    size_t pos = 0;
+    while (pos < text.size()) {
+        size_t nl = text.find('\n', pos);
+        if (nl == std::string::npos) nl = text.size();
+        std::string l = text.substr(pos, nl - pos);
+        if (!l.empty() && l.back() == '\r') l.pop_back();
+        lines.push_back(l);
+        pos = nl + 1;
+    }
+    return lines;
+}
+}  // namespace
+
 std::string configUpgradeText(const std::string& existing) {
-    if (existing.find("ha_token") != std::string::npos) return "";
-    std::string t;
-    if (!existing.empty() && existing.back() != '\n') t += '\n';
-    t += '\n';
-    addAiSection(t);
-    return t;
+    std::vector<std::string> have;
+    for (const auto& l : splitLines(existing)) {
+        const std::string k = settingKeyOf(l);
+        if (!k.empty()) have.push_back(k);
+    }
+    auto present = [&](const std::string& k) {
+        for (const auto& h : have) if (h == k) return true;
+        return false;
+    };
+
+    // Walk the default file section by section ("# --- Camera ---"). A section
+    // missing entirely is added whole, with its explanations; otherwise just
+    // the missing lines, under the section's heading.
+    std::string out;
+    std::vector<std::string> section;
+    auto flush = [&]() {
+        if (section.empty()) return;
+        std::vector<std::string> missing;
+        int settings = 0;
+        for (const auto& l : section) {
+            if (trim(l).rfind("#", 0) == 0) continue;  // only real setting lines count
+            const std::string k = settingKeyOf(l);
+            if (k.empty()) continue;
+            ++settings;
+            if (!present(k)) missing.push_back(l);
+        }
+        if (!missing.empty()) {
+            out += '\n';
+            if ((int)missing.size() == settings) {
+                for (const auto& l : section) {
+                    out += l;
+                    out += '\n';
+                }
+                while (out.size() >= 2 && out[out.size() - 1] == '\n' && out[out.size() - 2] == '\n') out.pop_back();
+            } else {
+                out += section[0] + " (added by an update)\n";
+                for (const auto& l : missing) {
+                    out += l;
+                    out += '\n';
+                }
+            }
+        }
+        section.clear();
+    };
+    for (const auto& l : splitLines(defaultConfigText())) {
+        if (l.rfind("# --- ", 0) == 0) flush();
+        if (l.rfind("# --- ", 0) == 0 || !section.empty()) section.push_back(l);
+    }
+    flush();
+    if (out.empty()) return "";
+    if (!existing.empty() && existing.back() != '\n') out.insert(out.begin(), '\n');
+    return out;
 }
 
 std::string defaultConfigText() {

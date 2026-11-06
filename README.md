@@ -254,8 +254,10 @@ and restart the buddy.
 | `conversation` | `off` uses only the built-in commands, even with the above filled in |
 | `follow_up` | `off` makes it go back to waiting for "Hey Buddy" after each answer |
 
-A `settings.txt` from an older version gets the new Wi-Fi and Home Assistant
-lines added to the end automatically on the next start.
+When an update adds new settings, they're added to the end of your
+`settings.txt` (at their default values, with their explanations) the next
+time it starts, so the file always lists everything you can change. A setting
+you commented out with `#` is left alone.
 
 Mistakes, such as a typo or an out-of-range number, are listed in the serial log,
 and that line is ignored. Without a card, it uses the built-in defaults. The

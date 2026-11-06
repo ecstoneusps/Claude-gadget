@@ -62,8 +62,10 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
 // its default value.
 std::string defaultConfigText();
 
-// For a settings.txt written by an older version: the sections it is
-// missing (to append to the file), or "" if it has them all.
+// For a settings.txt written by an older version: every setting it doesn't
+// mention yet, at its default, to append to the file (whole sections with
+// their explanations, or single lines under their section's heading). ""
+// if nothing is missing. A commented-out setting counts as present.
 std::string configUpgradeText(const std::string& existing);
 
 // "say.good_night" style key for a command, and the reverse lookup.

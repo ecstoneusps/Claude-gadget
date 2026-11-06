@@ -176,6 +176,37 @@ static void test_upgrade_old_file() {
     CHECK(cfg.volume == 40 && cfg.brightness == 50 && cfg.haPipeline == "Buddy");
 }
 
+static void test_upgrade_adds_single_missing_settings() {
+    // An older file: everything except face_model and the camera preview, and
+    // with proximity commented out on purpose.
+    std::string old;
+    {
+        const std::string d = defaultConfigText();
+        size_t pos = 0;
+        while (pos < d.size()) {
+            size_t nl = d.find('\n', pos);
+            std::string l = d.substr(pos, nl - pos);
+            pos = nl + 1;
+            if (l.rfind("face_model", 0) == 0 || l.rfind("camera_preview", 0) == 0) continue;
+            if (l.rfind("proximity ", 0) == 0) l = "# " + l;
+            old += l + "\n";
+        }
+    }
+    const std::string extra = configUpgradeText(old);
+    CHECK(extra.find("face_model") != std::string::npos);
+    CHECK(extra.find("camera_preview") != std::string::npos);
+    CHECK(extra.find("# --- Camera --- (added by an update)") != std::string::npos);
+    CHECK(extra.find("proximity ") == std::string::npos);  // commented out = your choice, left alone
+    CHECK(extra.find("volume") == std::string::npos);
+    CHECK(extra.find("wifi_name") == std::string::npos);
+    CHECK(configUpgradeText(old + extra).empty());  // only once
+    BuddyConfig cfg;
+    std::vector<std::string> w;
+    parseConfig(old + extra, cfg, w);
+    for (auto& s : w) printf("  unexpected warning: %s\n", s.c_str());
+    CHECK(w.empty());
+}
+
 static void test_duplicate_settings() {
     // You fill in a line, but the template's empty line is still further down.
     BuddyConfig cfg;
@@ -207,6 +238,7 @@ int main(int argc, char** argv) {
         {"AI settings mistakes", test_ai_settings_mistakes},
         {"older settings file is upgraded", test_upgrade_old_file},
         {"duplicate settings", test_duplicate_settings},
+        {"upgrade adds single missing settings", test_upgrade_adds_single_missing_settings},
         {"repo copy of settings.txt matches firmware", test_repo_copy_matches_firmware_default},
     };
     for (auto& t : tests) {
