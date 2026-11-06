@@ -333,7 +333,7 @@ std::string defaultConfigText() {
     onoff("camera_mirrored", d.cameraMirrored, "flip (on/off) if the eyes look away from you instead of at you");
     flt("face_gaze", d.faceGaze, "how far the eyes turn toward you, 0-3");
     snprintf(buf, sizeof buf, "%-28s = %-6s # %s", "face_model", d.accurateFaceModel ? "accurate" : "fast",
-             "accurate finds you far more often; fast checks more times a second");
+             "fast checks ~14 times a second; accurate finds you more often per check but is ~7x slower");
     add(buf);
     onoff("camera_preview", d.cameraPreview, "show what the camera sees (green box = face found) instead of the face");
     add("");

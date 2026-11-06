@@ -243,7 +243,7 @@ and restart the buddy.
 | `command_confidence` | Raise to around 0.3 if it reacts to things you didn't say. The serial log shows each command's confidence |
 | `say.<command> = phrase, phrase` | Extra ways to say any command, e.g. `say.hello = howdy, whats up buddy` |
 | `face_tracking`, `camera_mirrored`, `face_gaze` | Camera on/off, fix eyes that look away from you, how far they turn |
-| `face_model` | `accurate` (ESPDet-Pico, default) finds you far more often; `fast` (MSR+MNP) checks more times a second |
+| `face_model` | `fast` (MSR+MNP, default) checks about 14 times a second; `accurate` (ESPDet-Pico) finds you more often per check but takes ~0.5 s each and slows the animation |
 | `camera_preview` | Show what the camera sees, with a green box around a detected face (for troubleshooting) |
 | `proximity`, `proximity_sensitivity` | Proximity sensor on/off; lower sensitivity numbers notice you from further away |
 | `flip_tilt_x`, `flip_tilt_y` | Fix tilt reactions that go the wrong way |

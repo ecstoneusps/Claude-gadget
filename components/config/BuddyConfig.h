@@ -28,7 +28,10 @@ struct BuddyConfig {
     bool cameraMirrored = false;   // correct for the CoreS3's camera (confirmed on hardware)
     float faceGaze = 1.4f;         // 0-3
     bool cameraPreview = false;    // show the camera image instead of the face (diagnostic)
-    bool accurateFaceModel = true; // "accurate" ESPDet-Pico vs "fast" MSR+MNP
+    // "fast" MSR+MNP (~70 ms, ~14 checks/s) vs "accurate" ESPDet-Pico (~500 ms
+    // on this board). On hardware the fast one followed a face better overall,
+    // and the accurate one slowed the face animation (shared PSRAM bandwidth).
+    bool accurateFaceModel = false;
 
     // Proximity sensor
     bool proximity = true;

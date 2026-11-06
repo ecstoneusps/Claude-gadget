@@ -376,7 +376,9 @@ static void uiTask(void*) {
             M5.Display.setBrightness(percentTo255(dimmed ? config.dimBrightness : config.brightness));
         }
 
+        bool drew = false;
         if (now - lastFrame >= kFrameMs) {
+            drew = true;
             face.update(now - lastFrame);
             lastFrame = now;
             ++frames;
@@ -387,7 +389,11 @@ static void uiTask(void*) {
                 canvas.pushSprite(0, 0);
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(2));
+        // Drawing a frame takes most of core 1; rest a little after each one so
+        // everything else on this core (reply download, sound, camera driver,
+        // idle task) gets a turn. Without it the task watchdog fired while a
+        // reply was being fetched.
+        vTaskDelay(pdMS_TO_TICKS(drew ? 6 : 2));
     }
 }
 

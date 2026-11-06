@@ -32,7 +32,7 @@ two_microphones              = off    # both mics: hears you better over noise, 
 face_tracking                = on     # eyes follow your face
 camera_mirrored              = off    # flip (on/off) if the eyes look away from you instead of at you
 face_gaze                    = 1.4    # how far the eyes turn toward you, 0-3
-face_model                   = accurate # accurate finds you far more often; fast checks more times a second
+face_model                   = fast   # fast checks ~14 times a second; accurate finds you more often per check but is ~7x slower
 camera_preview               = off    # show what the camera sees (green box = face found) instead of the face
 
 # --- Proximity sensor (above the screen) ---

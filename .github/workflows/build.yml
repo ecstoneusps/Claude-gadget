@@ -63,5 +63,6 @@ jobs:
             build/partition_table/partition-table.bin
             build/desk_companion.bin
             build/srmodels/srmodels.bin
+            build/desk_companion.elf
             dependencies.lock
           if-no-files-found: error
