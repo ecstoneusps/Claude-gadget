@@ -7,6 +7,8 @@
 #include "Face.h"
 #include "Sfx.h"
 #include "Presence.h"
+#include "DirtyCanvas.h"
+#include "SoftCanvas.h"
 
 static int failures = 0;
 #define CHECK(cond)                                                     \
@@ -625,6 +627,50 @@ static void test_presence_ignores_zero_at_start() {
     CHECK(p.baseline() > 80 && p.baseline() < 90);
 }
 
+// Clearing and sending only the area that changed must look exactly like
+// redrawing the whole screen, through every expression, gaze, blink, talk.
+static void test_dirty_canvas_matches_full_redraw() {
+    const int W = 320, H = 240;
+    Face face;
+    face.setSeed(7);
+    SoftCanvas full(W, H), back(W, H), screen(W, H);
+    DirtyCanvas dc(back);
+    double area = 0;
+    int frames = 0, mismatchFrame = -1;
+    for (int f = 0; f < 4000 && mismatchFrame < 0; ++f) {
+        if (f % 120 == 0) face.setExpression((Expression)((f / 120) % (int)Expression::Count));
+        if (f % 90 == 45) face.setLookAt(sinf(f * 0.37f), cosf(f * 0.53f));
+        if (f % 300 == 299) face.clearLookAt();
+        if (f % 250 == 0) face.blinkNow();
+        face.setTalkLevel((f % 30) / 30.0f);
+        if (f == 2000) {  // something else covered the screen (a photo)
+            back.fillScreen(0xF800);
+            screen.fillScreen(0xF800);
+            dc.invalidateAll();
+        }
+        face.update(33);
+        face.draw(full);
+        dc.beginFrame();
+        face.draw(dc);
+        const DirtyCanvas::Rect r = dc.dirty();
+        for (int y = r.y0; y < r.y1; ++y)
+            for (int x = r.x0; x < r.x1; ++x) screen.set(x, y, back.at(x, y));
+        for (int y = 0; y < H && mismatchFrame < 0; ++y)
+            for (int x = 0; x < W; ++x)
+                if (screen.at(x, y) != full.at(x, y)) {
+                    mismatchFrame = f;
+                    printf("  frame %d differs at %d,%d (expression %d)\n", f, x, y, (int)face.expression());
+                    break;
+                }
+        area += (double)r.width() * r.height() / (W * H);
+        ++frames;
+    }
+    CHECK(mismatchFrame < 0);
+    const double avg = area / frames;
+    printf("  dirty area averages %.0f%% of the screen\n", avg * 100);
+    CHECK(avg < 0.8);
+}
+
 static void test_action_commands() {
     CHECK(isActionCommand(VoiceCommand::Wink));
     CHECK(isActionCommand(VoiceCommand::GoodNight));
@@ -680,6 +726,7 @@ int main() {
         {"action commands", test_action_commands},
         {"volume commands", test_volume_commands},
         {"camera commands", test_camera_commands},
+        {"dirty canvas matches full redraw", test_dirty_canvas_matches_full_redraw},
         {"presence ignores zero readings at start", test_presence_ignores_zero_at_start},
     };
     for (auto& t : tests) {

@@ -31,6 +31,7 @@
 
 #include "BuddyConfig.h"
 #include "Companion.h"
+#include "DirtyCanvas.h"
 #include "Face.h"
 #include "Presence.h"
 #include "assistant.h"
@@ -84,6 +85,10 @@ private:
 
 static M5Canvas canvas(&M5.Display);
 static M5CanvasAdapter canvasAdapter(canvas);
+// The face only covers the middle of the screen: clear and send just the
+// part that changed (about half the screen) instead of all 150 KB per frame.
+static DirtyCanvas faceCanvas(canvasAdapter);
+static struct { uint64_t drawUs = 0, sendUs = 0, areaPct = 0; uint32_t frames = 0; } frameStats;
 static Face face;
 static Companion buddy(face);
 static QueueHandle_t voiceEvents;
@@ -565,6 +570,13 @@ static void uiTask(void*) {
                      (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
             static CpuWindow cpu;
             if (lastStatus != 0) cpu.log("cpu last 30 s");
+            if (frameStats.frames > 0) {
+                const uint32_t n = frameStats.frames;
+                ESP_LOGI(TAG, "face frames: draw %.1f ms, send %.1f ms, %u%% of the screen changed (average of %u)",
+                         frameStats.drawUs / 1000.0 / n, frameStats.sendUs / 1000.0 / n,
+                         (unsigned)(frameStats.areaPct / n), (unsigned)n);
+                frameStats = {};
+            }
             cpu.mark();
             lastStatus = now;
             frames = 0;
@@ -604,12 +616,25 @@ static void uiTask(void*) {
             lastFrame = now;
             ++frames;
             if (runPhoto(now)) {
-                // the camera has the screen
+                faceCanvas.invalidateAll();  // the camera has the screen
             } else if (config.cameraPreview) {
+                faceCanvas.invalidateAll();
                 drawCameraPreview();
             } else {
-                face.draw(canvasAdapter);
-                canvas.pushSprite(0, 0);
+                const int64_t t0 = esp_timer_get_time();
+                faceCanvas.beginFrame();
+                face.draw(faceCanvas);
+                const DirtyCanvas::Rect r = faceCanvas.dirty();
+                const int64_t t1 = esp_timer_get_time();
+                if (!r.empty()) {
+                    M5.Display.setClipRect(r.x0, r.y0, r.width(), r.height());
+                    canvas.pushSprite(0, 0);  // sends only the clipped area
+                    M5.Display.clearClipRect();
+                }
+                frameStats.drawUs += t1 - t0;
+                frameStats.sendUs += esp_timer_get_time() - t1;
+                frameStats.areaPct += (uint64_t)r.width() * r.height() * 100 / (canvas.width() * canvas.height());
+                ++frameStats.frames;
             }
         }
         // Drawing a frame takes most of core 1; rest a little after each one so
