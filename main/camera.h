@@ -38,7 +38,7 @@ constexpr int kCamW = 160, kCamH = 120;
 void cameraEnablePreview();
 bool cameraCopyPreview(uint16_t* dst, uint32_t* seq);
 
-// Photos ("take a picture", "what do you see"): the camera runs at 640x480
+// Photos ("take a picture", "what do you see"): the camera runs at 320x240
 // only between photoBegin() and photoEnd() (face tracking, if on, pauses
 // meanwhile). Call these from one task.
 constexpr int kPhotoW = 320, kPhotoH = 240;  // live view / still size: the screen

@@ -249,16 +249,17 @@ FaceSighting faceTrackingLatest() {
 }
 
 // ---------------------------------------------------------------------------
-// Photos: the camera is started at 640x480 only while a photo is being taken.
+// Photos: the camera is started at 320x240 only while a photo is being taken.
 
 static bool s_photoOn = false;
 static bool s_photoPausedTracking = false;
 
 static void startCamera(framesize_t size, int fbCount) {
-    // Photos: the camera writes straight into the PSRAM frame buffers. The
-    // small internal DMA buffer (8 KB, to leave room for Wi-Fi) overflowed at
-    // 640x480 and no frame ever completed.
-    esp_camera_set_psram_mode(size != FRAMESIZE_QQVGA);
+    // Always the normal mode (through the small internal DMA buffer). The
+    // "DMA straight into PSRAM" mode delivered frames at 640x480 but with
+    // whole strips missing or filled with old memory (hardware test, with
+    // and without a slower pixel clock).
+    esp_camera_set_psram_mode(false);
     camera_config_t cfg = makeConfig(size, fbCount);
     esp_err_t err = esp_camera_init(&cfg);
     if (err != ESP_OK) {
@@ -268,12 +269,13 @@ static void startCamera(framesize_t size, int fbCount) {
     if (sensor_t* sen = esp_camera_sensor_get()) {
         if (sen->set_ae_level) sen->set_ae_level(sen, 2);
         if (size != FRAMESIZE_QQVGA && sen->set_reg) {
-            // Halve the sensor's pixel clock (GC0308 register 0x28, bits 6:4 =
-            // divider - 1, as the driver does on the original ESP32). At full
-            // speed, 640x480 frames streaming into PSRAM next to the display
-            // and speech fell behind: wavy lines and scrambled colors.
+            // Slow the sensor's pixel clock (GC0308 register 0x28, bits 6:4 =
+            // divider - 1; the driver uses 1 on the original ESP32). A photo
+            // frame is 4x the data of a tracking frame, and the small DMA
+            // buffer must keep up: /4 gives it the same data rate as tracking.
             sen->set_reg(sen, 0xfe, 0xff, 0x00);  // register page 0
-            sen->set_reg(sen, 0x28, 0x70, 0x10);
+            sen->set_reg(sen, 0x28, 0x70, 0x30);
+            if (sen->get_reg) ESP_LOGI(TAG, "pixel clock divider register 0x28 = 0x%02x", sen->get_reg(sen, 0x28, 0xff));
         }
     }
     if (size != FRAMESIZE_QQVGA) s_photoOn = true;
@@ -299,20 +301,9 @@ bool photoBegin() {
         esp_camera_deinit();
         s_photoPausedTracking = true;
     }
-    // Two buffers so the live view always shows the newest frame (2 x 600 KB
-    // of PSRAM). If 640x480 doesn't deliver frames, settle for 320x240.
-    startCamera(FRAMESIZE_VGA, 2);
-    if (s_photoOn) {
-        camera_fb_t* fb = frameWithin(1500);
-        if (fb) {
-            esp_camera_fb_return(fb);
-        } else {
-            ESP_LOGW(TAG, "no frames at 640x480; using 320x240");
-            esp_camera_deinit();
-            s_photoOn = false;
-            startCamera(FRAMESIZE_QVGA, 2);
-        }
-    }
+    // 320x240: the screen's size, and what the camera delivers cleanly (see
+    // startCamera). Two buffers so the live view always shows the newest frame.
+    startCamera(FRAMESIZE_QVGA, 2);
     if (!s_photoOn) {
         if (s_photoPausedTracking) {
             startCamera(FRAMESIZE_QQVGA, 2);
@@ -372,7 +363,6 @@ void photoEnd() {
     if (!s_photoOn) return;
     esp_camera_deinit();
     s_photoOn = false;
-    esp_camera_set_psram_mode(false);
     if (s_photoPausedTracking) {
         startCamera(FRAMESIZE_QQVGA, 2);
         s_photoPausedTracking = false;

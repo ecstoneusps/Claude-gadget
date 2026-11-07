@@ -45,7 +45,7 @@ default since tracking costs a lot of CPU for little movement on this screen).
 
 - **"Take a picture"** (or "take a photo of me", "say cheese"): the screen shows
   the camera's view with a 3-2-1 countdown, flashes, shows the photo, and saves
-  it as `photos/IMG_0001.jpg`, `IMG_0002.jpg`... (640x480) on the SD card.
+  it as `photos/IMG_0001.jpg`, `IMG_0002.jpg`... (320x240) on the SD card.
   Works without Wi-Fi.
 - **"What do you see?"**, "what am I holding?", "can you read this?", "how do I
   look?": it takes a photo and sends it, with your question, to a vision model
@@ -83,7 +83,7 @@ compliments) are answered by the AI instead:
 | be quiet / quiet please | Turns its sounds off (remembered after a restart) |
 | louder / speak up / turn it up / volume up / talk louder | Volume up 10 (saved to `volume` in settings.txt) |
 | quieter / turn it down / volume down / talk quieter | Volume down 10 (saved too; never below 10) |
-| take a picture / take a photo / take a selfie / say cheese | Live view with a countdown, then saves `photos/IMG_0001.jpg`... on the SD card |
+| take a picture / take a photo / take a selfie / say cheese | Live view with a countdown, then saves `photos/IMG_0001.jpg`... (320x240) on the SD card |
 | what do you see / what is this / what am I holding / look at this | Takes a photo and describes it out loud (needs the AI and a vision model, see below) |
 | sound on / you can talk | Turns its sounds back on |
 
