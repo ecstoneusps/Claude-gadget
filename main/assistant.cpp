@@ -11,6 +11,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
+#include "mbedtls/base64.h"
 #include "freertos/idf_additions.h"
 #include "freertos/stream_buffer.h"
 #include "freertos/task.h"
@@ -47,6 +48,19 @@ static std::atomic<bool> s_audioEnded{false};
 static std::atomic<bool> s_heardSpeech{false};
 static std::atomic<bool> s_sttDone{false};
 static std::atomic<const char*> s_status{"off"};
+
+// "What do you see": the photo waiting to be looked at (main loop -> assistant task).
+static uint8_t* s_lookJpeg = nullptr;
+static size_t s_lookLen = 0;
+static std::string s_lookQuestion;
+static bool s_lookFromConversation = false;
+static std::string s_lookMarker;  // posted to the inbox (compared by address)
+// Assistant task only: the last photo and what was said about it, so
+// follow-up questions ("what colour is it?") can go back to the vision model.
+static std::string s_visionImage;  // base64 JPEG
+static std::vector<std::pair<std::string, std::string>> s_visionChat;  // (role, text)
+static uint32_t s_visionUntil = 0;
+static constexpr uint32_t kVisionFollowUpMs = 60000;
 
 // Websocket task only.
 static std::string s_rx;
@@ -419,6 +433,9 @@ static bool speak(const std::string& text) {
     return true;
 }
 
+static std::string askVision(const std::string& question);
+static void deliverReply(const std::string& reply, bool micsWaiting);
+
 // You said something: run it as a built-in command, or ask the AI.
 static void handleHeard(const std::string& text) {
     ESP_LOGI(TAG, "heard: \"%s\"", text.c_str());
@@ -438,6 +455,21 @@ static void handleHeard(const std::string& text) {
         else voiceResume();
         return;
     }
+    // Asking about what it sees: a fresh photo (the main loop takes it and
+    // calls assistantLook). The microphones keep waiting meanwhile.
+    if (!s_cfg.visionUrl.empty() && isVisionRequest(text)) {
+        ESP_LOGI(TAG, "-> taking a look");
+        finishTurn();
+        s_turnActive.store(true);  // until the photo arrives
+        post(AssistEvent::Look, text.c_str());
+        return;
+    }
+    if (isPhotoRequest(text)) {
+        ESP_LOGI(TAG, "-> built-in command %s", commandName(VoiceCommand::TakePicture));
+        post(AssistEvent::Command, "", "", (int)VoiceCommand::TakePicture);
+        endTurnAndResume();
+        return;
+    }
     auto local = [&](VoiceCommand cmd, const std::string& phrase) {
         if (!isActionCommand(cmd) || !speechMatchesPhrase(text, phrase)) return false;
         ESP_LOGI(TAG, "-> built-in command %s", commandName(cmd));
@@ -449,7 +481,54 @@ static void handleHeard(const std::string& text) {
         if (local(kCommandPhrases[i].command, kCommandPhrases[i].text)) return;
     for (const auto& [cmd, phrase] : s_cfg.extraPhrases)
         if (local(cmd, phrase)) return;
+    // A follow-up right after it described a photo: ask the vision model
+    // again, with the same photo. (A new "Hey Buddy" goes to the chat AI.)
+    if (s_followUpTurn.load() && !s_visionImage.empty() && (int32_t)(s_visionUntil - nowMs()) > 0) {
+        finishTurn();
+        s_turnActive.store(true);
+        post(AssistEvent::Thinking);
+        const std::string answer = askVision(text);
+        if (answer.empty()) {
+            s_turnActive.store(false);
+            post(AssistEvent::Error, "couldn't see");
+            voiceResume();
+        } else {
+            deliverReply(answer, true);
+        }
+        return;
+    }
+    s_visionImage.clear();  // moved on from the photo
+    s_visionChat.clear();
     startIntentRun(text);
+}
+
+// Shows and speaks a reply ("[happy] Sure! ..."), then hands the microphones
+// back: listening for a follow-up, or waiting for "Hey Buddy" again.
+// `micsWaiting`: voice.cpp is waiting for this turn to finish.
+static void deliverReply(const std::string& reply, bool micsWaiting) {
+    const ReplyParts parts = splitReply(reply);
+    ESP_LOGI(TAG, "reply [%s]: \"%s\"", parts.emotion.c_str(), parts.speech.c_str());
+    finishTurn();
+    s_turnActive.store(true);  // still busy until it has spoken
+
+    post(AssistEvent::Reply, "", parts.emotion.c_str());
+    bool spoke = false;
+    if (!parts.speech.empty()) {
+        spoke = s_ready.load() && speak(parts.speech);
+        if (!spoke) post(AssistEvent::Error, "couldn't get the spoken reply");
+    }
+    if (spoke) {
+        while (soundSpeaking()) vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(pdMS_TO_TICKS(250));  // let the speaker's echo die away before listening
+    }
+    if (spoke || parts.speech.empty()) post(AssistEvent::Done);  // (a failure already showed confusion)
+    s_turnActive.store(false);
+    if (!micsWaiting) return;
+    if (spoke && s_cfg.followUp && s_ready.load() && assistantBeginTurn(true)) {
+        voiceFollowUp();
+    } else {
+        voiceResume();
+    }
 }
 
 static void handleReply(const cJSON* intentOutput) {
@@ -462,28 +541,129 @@ static void handleReply(const cJSON* intentOutput) {
         s_conversationId = cid;
         s_conversationUntil = nowMs() + kConversationMs;
     }
-    const ReplyParts parts = splitReply(said ? said : "");
-    ESP_LOGI(TAG, "reply [%s]: \"%s\"", parts.emotion.c_str(), parts.speech.c_str());
-    finishTurn();
-    s_turnActive.store(true);  // still busy until it has spoken
+    deliverReply(said ? said : "", true);
+}
 
-    post(AssistEvent::Reply, "", parts.emotion.c_str());
-    bool spoke = false;
-    if (!parts.speech.empty()) {
-        spoke = speak(parts.speech);
-        if (!spoke) post(AssistEvent::Error, "couldn't get the spoken reply");
+// ---------------------------------------------------------------------------
+// Seeing: a photo and a question straight to a vision model in Ollama.
+
+static const char* kVisionPrompt =
+    "You are Buddy, a small, cheerful robot that lives on your owner's desk. The image is what you see "
+    "right now through your camera (it may be a bit dark or blurry). Answer what your owner asked about "
+    "it in one to three short, friendly sentences, the way you'd say them out loud: no lists, no "
+    "markdown, no emoji. If you can't tell what something is, say so honestly. Start your reply with "
+    "exactly one emotion tag in square brackets, chosen from: [happy] [laughing] [loving] [surprised] "
+    "[shocked] [thinking] [confused] [cool] [silly] [embarrassed] [sad] [neutral].";
+
+// Asks the vision model about the current photo (s_visionImage). Returns the
+// reply text, or "" (and logs why) if it failed.
+static std::string askVision(const std::string& question) {
+    cJSON* req = cJSON_CreateObject();
+    cJSON_AddStringToObject(req, "model", s_cfg.visionModel.c_str());
+    cJSON_AddBoolToObject(req, "stream", false);
+    cJSON_AddStringToObject(req, "keep_alive", "10m");
+    cJSON* msgs = cJSON_AddArrayToObject(req, "messages");
+    auto add = [&](const char* role, const std::string& text, bool withImage) {
+        cJSON* m = cJSON_CreateObject();
+        cJSON_AddStringToObject(m, "role", role);
+        cJSON_AddStringToObject(m, "content", text.c_str());
+        if (withImage) {
+            cJSON* imgs = cJSON_AddArrayToObject(m, "images");
+            cJSON_AddItemToArray(imgs, cJSON_CreateString(s_visionImage.c_str()));
+        }
+        cJSON_AddItemToArray(msgs, m);
+    };
+    add("system", kVisionPrompt, false);
+    bool first = true;
+    for (const auto& [role, text] : s_visionChat) {
+        add(role.c_str(), text, first && role == "user");
+        if (role == "user") first = false;
     }
-    if (spoke) {
-        while (soundSpeaking()) vTaskDelay(pdMS_TO_TICKS(20));
-        vTaskDelay(pdMS_TO_TICKS(250));  // let the speaker's echo die away before listening
-    }
-    if (spoke || parts.speech.empty()) post(AssistEvent::Done);  // (a failure already showed confusion)
-    s_turnActive.store(false);
-    if (spoke && s_cfg.followUp && s_ready.load() && assistantBeginTurn(true)) {
-        voiceFollowUp();
+    add("user", question, first);
+    char* body = cJSON_PrintUnformatted(req);
+    cJSON_Delete(req);
+    if (!body) return "";
+
+    const std::string url = s_cfg.visionUrl + "/api/chat";
+    esp_http_client_config_t hc = {};
+    hc.url = url.c_str();
+    hc.method = HTTP_METHOD_POST;
+    hc.timeout_ms = 90000;  // loading the model the first time can take a while
+    hc.buffer_size = 2048;
+    hc.crt_bundle_attach = esp_crt_bundle_attach;
+    esp_http_client_handle_t http = esp_http_client_init(&hc);
+    esp_http_client_set_header(http, "Content-Type", "application/json");
+    const int bodyLen = strlen(body);
+    const int64_t t0 = esp_timer_get_time();
+    std::string resp;
+    int status = 0;
+    if (esp_http_client_open(http, bodyLen) == ESP_OK && esp_http_client_write(http, body, bodyLen) == bodyLen) {
+        esp_http_client_fetch_headers(http);
+        char chunk[512];
+        int n;
+        while ((n = esp_http_client_read(http, chunk, sizeof chunk)) > 0 && resp.size() < 32768) resp.append(chunk, n);
+        status = esp_http_client_get_status_code(http);
     } else {
-        voiceResume();
+        ESP_LOGW(TAG, "couldn't reach the vision model at %s (is Ollama running, and vision_url right?)",
+                 s_cfg.visionUrl.c_str());
     }
+    esp_http_client_cleanup(http);
+    cJSON_free(body);
+    if (status == 0) return "";
+    if (status != 200) {
+        if (status == 404)
+            ESP_LOGW(TAG, "Ollama doesn't have \"%s\": on the PC run  ollama pull %s", s_cfg.visionModel.c_str(),
+                     s_cfg.visionModel.c_str());
+        else
+            ESP_LOGW(TAG, "vision model error: HTTP %d %.160s", status, resp.c_str());
+        return "";
+    }
+    cJSON* j = cJSON_Parse(resp.c_str());
+    const cJSON* m = j ? cJSON_GetObjectItemCaseSensitive(j, "message") : nullptr;
+    const char* content = jstr(m, "content");
+    std::string answer = content ? content : "";
+    cJSON_Delete(j);
+    ESP_LOGI(TAG, "vision model answered in %d ms", (int)((esp_timer_get_time() - t0) / 1000));
+    if (!answer.empty()) {
+        s_visionChat.emplace_back("user", question);
+        s_visionChat.emplace_back("assistant", answer);
+        s_visionUntil = nowMs() + kVisionFollowUpMs;
+    }
+    return answer;
+}
+
+static void handleLook() {
+    uint8_t* jpeg = s_lookJpeg;
+    const size_t len = s_lookLen;
+    const std::string question = s_lookQuestion.empty() ? "What do you see?" : s_lookQuestion;
+    const bool micsWaiting = s_lookFromConversation;
+    s_lookJpeg = nullptr;
+
+    // A new photo starts a new little conversation about it.
+    s_visionChat.clear();
+    s_visionImage.clear();
+    size_t b64len = 0;
+    mbedtls_base64_encode(nullptr, 0, &b64len, jpeg, len);
+    s_visionImage.resize(b64len);
+    size_t written = 0;
+    if (mbedtls_base64_encode((unsigned char*)&s_visionImage[0], b64len, &written, jpeg, len) == 0)
+        s_visionImage.resize(written);
+    else
+        s_visionImage.clear();
+    heap_caps_free(jpeg);
+
+    s_turnActive.store(true);
+    post(AssistEvent::Thinking);
+    ESP_LOGI(TAG, "looking: \"%s\" (%u KB photo -> %s)", question.c_str(), (unsigned)(len / 1024),
+             s_cfg.visionModel.c_str());
+    const std::string answer = s_visionImage.empty() ? "" : askVision(question);
+    if (answer.empty()) {
+        s_turnActive.store(false);
+        post(AssistEvent::Error, "couldn't see");
+        if (micsWaiting) voiceResume();
+        return;
+    }
+    deliverReply(answer, micsWaiting);
 }
 
 static void handleRunEvent(const cJSON* ev) {
@@ -665,7 +845,9 @@ static void assistantTask(void*) {
         std::string* msg = nullptr;
         const TickType_t wait = s_stage == Stage::Idle ? pdMS_TO_TICKS(30) : pdMS_TO_TICKS(10);
         if (xQueueReceive(s_inbox, &msg, wait) == pdTRUE) {
-            if (msg == &s_connectedMarker) {
+            if (msg == &s_lookMarker) {
+                handleLook();
+            } else if (msg == &s_connectedMarker) {
                 s_authSent = false;  // new connection
                 sendAuth();
             } else if (msg) {
@@ -741,3 +923,22 @@ void assistantEndAudio(bool heardSpeech) {
 }
 
 bool assistantSttDone() { return s_sttDone.load(); }
+
+bool assistantCanSee() { return !s_cfg.visionUrl.empty() && s_ready.load(); }
+
+void assistantLook(uint8_t* jpeg, size_t len, const std::string& question, bool fromConversation) {
+    if (!jpeg || !s_inbox || s_lookJpeg) {  // no photo, not running, or still busy with the last one
+        heap_caps_free(jpeg);
+        if (fromConversation) {
+            s_turnActive.store(false);
+            voiceResume();
+        }
+        return;
+    }
+    s_lookJpeg = jpeg;
+    s_lookLen = len;
+    s_lookQuestion = question;
+    s_lookFromConversation = fromConversation;
+    std::string* m = &s_lookMarker;
+    xQueueSend(s_inbox, &m, pdMS_TO_TICKS(100));
+}

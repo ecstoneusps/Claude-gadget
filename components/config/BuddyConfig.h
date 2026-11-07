@@ -54,6 +54,10 @@ struct BuddyConfig {
     bool conversation = true;        // off: only the built-in commands, even with Wi-Fi set up
     bool followUp = true;            // keep listening after an answer, without "Hey Buddy"
 
+    // "What do you see?": photos go straight to a vision model in Ollama
+    std::string visionUrl;           // http://192.168.4.98:11434 ("" = no vision)
+    std::string visionModel = "gemma3:4b";
+
     bool aiConfigured() const { return conversation && !wifiName.empty() && !haUrl.empty() && !haToken.empty(); }
 };
 

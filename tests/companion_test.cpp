@@ -605,6 +605,17 @@ static void test_volume_commands() {
     CHECK(isActionCommand(VoiceCommand::VolumeUp) && isActionCommand(VoiceCommand::VolumeDown));
 }
 
+static void test_camera_commands() {
+    Rig r;
+    CHECK(r.c.takeCameraRequest() == Companion::CameraRequest::None);
+    r.c.onCommand(VoiceCommand::TakePicture, r.now);
+    CHECK(r.c.takeCameraRequest() == Companion::CameraRequest::Photo);
+    CHECK(r.c.takeCameraRequest() == Companion::CameraRequest::None);
+    r.c.onCommand(VoiceCommand::LookAtThis, r.now);
+    CHECK(r.c.takeCameraRequest() == Companion::CameraRequest::Look);
+    CHECK(isActionCommand(VoiceCommand::TakePicture) && isActionCommand(VoiceCommand::LookAtThis));
+}
+
 static void test_action_commands() {
     CHECK(isActionCommand(VoiceCommand::Wink));
     CHECK(isActionCommand(VoiceCommand::GoodNight));
@@ -659,6 +670,7 @@ int main() {
         {"no clap reaction while replying", test_no_clap_reaction_while_replying},
         {"action commands", test_action_commands},
         {"volume commands", test_volume_commands},
+        {"camera commands", test_camera_commands},
     };
     for (auto& t : tests) {
         int before = failures;

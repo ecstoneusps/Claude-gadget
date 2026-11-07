@@ -203,6 +203,16 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
             cfg.haPipeline = val;
         } else if (key == "conversation") {
             if (!parseBool(val, cfg.conversation)) bad("must be on or off");
+        } else if (key == "vision_url") {
+            std::string v = val;
+            while (!v.empty() && v.back() == '/') v.pop_back();
+            const std::string lv = lower(v);
+            if (!v.empty() && lv.rfind("http://", 0) != 0 && lv.rfind("https://", 0) != 0)
+                bad("must start with http:// (e.g. http://192.168.1.30:11434)");
+            else cfg.visionUrl = v;
+        } else if (key == "vision_model") {
+            if (val.empty() || val.find(' ') != std::string::npos) bad("must be a model name like gemma3:4b");
+            else cfg.visionModel = val;
         } else if (key == "follow_up") {
             if (!parseBool(val, cfg.followUp)) bad("must be on or off");
         } else if (key.rfind("say.", 0) == 0) {
@@ -261,6 +271,12 @@ void addAiSection(std::string& t) {
     str("ha_pipeline", d.haPipeline, "name of the voice assistant in Home Assistant");
     onoff("conversation", d.conversation, "off = only the built-in commands");
     onoff("follow_up", d.followUp, "keep listening after an answer, no \"Hey Buddy\" needed");
+    add("");
+    add("# --- Seeing (\"what do you see?\", \"what am I holding?\") ---");
+    add("# Photos go straight to a vision model in Ollama on your PC; the answer is");
+    add("# spoken through Home Assistant. Install it first: ollama pull gemma3:4b");
+    str("vision_url", d.visionUrl, "Ollama's address, e.g. http://192.168.1.30:11434");
+    str("vision_model", d.visionModel, "a vision model you've pulled in Ollama");
 }
 }  // namespace
 

@@ -23,6 +23,8 @@ struct AssistantConfig {
     std::string pipeline;  // voice assistant name in Home Assistant ("" = its preferred one)
     bool followUp = true;  // listen again after each answer
     std::vector<std::pair<VoiceCommand, std::string>> extraPhrases;  // say.* from settings.txt
+    std::string visionUrl;    // Ollama, for "what do you see?" ("" = no vision)
+    std::string visionModel;  // e.g. gemma3:4b
 };
 
 // What the UI should show, posted to the queue given to assistantStart().
@@ -35,11 +37,12 @@ struct AssistEvent {
         NotHeard,  // no words recognized (`followUp`: it was a follow-up, so end quietly)
         Error,     // something failed (see the log); `text` says what
         WakeAgain, // you only said "Hey Buddy" (during a follow-up): it listens again
+        Look,      // you asked about what it sees (`text`): take a photo, then assistantLook()
     } type;
     bool followUp;
     int command;
     char emotion[16];
-    char text[48];
+    char text[128];
 };
 
 // Starts the client in the background: waits for Wi-Fi, connects, logs in
@@ -55,3 +58,13 @@ bool assistantBeginTurn(bool followUp);
 void assistantAudio(const int16_t* pcm, int samples);
 void assistantEndAudio(bool heardSpeech);
 bool assistantSttDone();  // Home Assistant decided you stopped talking
+
+// "What do you see?": after a Look event (or the offline "what is this"
+// command), the main loop takes a photo and hands it over here. Takes
+// ownership of `jpeg` (PSRAM). The answer comes back like any other reply
+// (Thinking, Reply + speech, Done). `fromConversation`: the request came
+// from an AI conversation turn (the microphones are waiting for this to
+// finish; follow-up questions about the photo then go to the vision model).
+// Pass jpeg = nullptr if the photo couldn't be taken (it lets go of the turn).
+bool assistantCanSee();  // vision is set up and Home Assistant is connected (to speak)
+void assistantLook(uint8_t* jpeg, size_t len, const std::string& question, bool fromConversation);

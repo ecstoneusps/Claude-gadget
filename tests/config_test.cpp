@@ -221,6 +221,17 @@ static void test_set_value() {
     CHECK(w.empty() && cfg.volume == 85);
 }
 
+static void test_vision_settings() {
+    BuddyConfig cfg;
+    std::vector<std::string> w;
+    CHECK(cfg.visionUrl.empty() && cfg.visionModel == "gemma3:4b");
+    parseConfig("vision_url = http://192.168.4.98:11434/\nvision_model = qwen2.5vl:7b\nvision_model = two words\n",
+                cfg, w);
+    CHECK(cfg.visionUrl == "http://192.168.4.98:11434");
+    CHECK(cfg.visionModel == "qwen2.5vl:7b");
+    CHECK(w.size() == 2);  // set twice, and not a model name
+}
+
 static void test_radar_settings() {
     BuddyConfig cfg;
     std::vector<std::string> w;
@@ -261,6 +272,7 @@ int main(int argc, char** argv) {
         {"older settings file is upgraded", test_upgrade_old_file},
         {"duplicate settings", test_duplicate_settings},
         {"radar settings", test_radar_settings},
+        {"vision settings", test_vision_settings},
         {"set a value in the file", test_set_value},
         {"upgrade adds single missing settings", test_upgrade_adds_single_missing_settings},
         {"repo copy of settings.txt matches firmware", test_repo_copy_matches_firmware_default},

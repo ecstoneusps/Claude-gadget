@@ -25,7 +25,7 @@ two_microphones              = off    # both mics: hears you better over noise, 
 #  say.good_job  say.scold  say.thank_you  say.tell_joke  say.look_left
 #  say.look_right  say.be_happy  say.be_sad  say.be_angry  say.be_surprised
 #  say.be_quiet  say.sound_on  say.wink  say.be_cool  say.be_silly
-#  say.volume_up  say.volume_down
+#  say.volume_up  say.volume_down  say.take_picture  say.look_at_this
 # say.hello = howdy, whats up buddy
 # say.good_night = nighty night
 
@@ -58,3 +58,9 @@ ha_token                     =        # long-lived access token (from the Desk B
 ha_pipeline                  = Buddy  # name of the voice assistant in Home Assistant
 conversation                 = on     # off = only the built-in commands
 follow_up                    = on     # keep listening after an answer, no "Hey Buddy" needed
+
+# --- Seeing ("what do you see?", "what am I holding?") ---
+# Photos go straight to a vision model in Ollama on your PC; the answer is
+# spoken through Home Assistant. Install it first: ollama pull gemma3:4b
+vision_url                   =        # Ollama's address, e.g. http://192.168.1.30:11434
+vision_model                 = gemma3:4b # a vision model you've pulled in Ollama

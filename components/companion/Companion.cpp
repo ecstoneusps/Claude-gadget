@@ -45,6 +45,14 @@ const CommandPhrase kCommandPhrases[] = {
     {VoiceCommand::VolumeDown, "turn it down"},
     {VoiceCommand::VolumeDown, "volume down"},
     {VoiceCommand::VolumeDown, "talk quieter"},
+    {VoiceCommand::TakePicture, "take a picture"},
+    {VoiceCommand::TakePicture, "take a photo"},
+    {VoiceCommand::TakePicture, "take a selfie"},
+    {VoiceCommand::TakePicture, "say cheese"},
+    {VoiceCommand::LookAtThis, "what do you see"},
+    {VoiceCommand::LookAtThis, "what is this"},
+    {VoiceCommand::LookAtThis, "look at this"},
+    {VoiceCommand::LookAtThis, "what am i holding"},
 };
 const int kCommandPhraseCount = sizeof(kCommandPhrases) / sizeof(kCommandPhrases[0]);
 
@@ -72,6 +80,8 @@ const char* commandName(VoiceCommand c) {
         case VoiceCommand::BeSilly:     return "be silly";
         case VoiceCommand::VolumeUp:    return "volume up";
         case VoiceCommand::VolumeDown:  return "volume down";
+        case VoiceCommand::TakePicture: return "take picture";
+        case VoiceCommand::LookAtThis:  return "look at this";
         default:                        return "none";
     }
 }
@@ -93,6 +103,8 @@ bool isActionCommand(VoiceCommand c) {
         case VoiceCommand::BeSilly:
         case VoiceCommand::VolumeUp:
         case VoiceCommand::VolumeDown:
+        case VoiceCommand::TakePicture:
+        case VoiceCommand::LookAtThis:
             return true;
         default:
             return false;  // hello, how are you, jokes, compliments: the AI answers those
@@ -334,6 +346,10 @@ void Companion::onCommand(VoiceCommand cmd, uint32_t now) {
             break;
         case VoiceCommand::VolumeDown:
             --volumeChange_; react(Expression::Relaxed, 1500, now); play(Sfx::Boop, now); break;
+        case VoiceCommand::TakePicture:
+            cameraRequest_ = CameraRequest::Photo; react(Expression::Happy, 1500, now); play(Sfx::Chirp, now); break;
+        case VoiceCommand::LookAtThis:
+            cameraRequest_ = CameraRequest::Look; react(Expression::Surprised, 1000, now); play(Sfx::Boop, now); break;
         default: break;
     }
 }

@@ -183,3 +183,31 @@ bool speechMatchesPhrase(const std::string& heard, const std::string& phrase) {
     }
     return h == p;
 }
+
+bool isVisionRequest(const std::string& heard) {
+    const std::string h = " " + normalizeSpeech(heard) + " ";
+    static const char* const kPhrases[] = {
+        " what do you see ", " what can you see ", " what are you seeing ", " what is this ",
+        " whats this ", " what is that ", " whats that ", " what am i holding ", " what im holding ",
+        " look at this ", " look at that ", " take a look ", " can you see ", " do you see ",
+        " describe what ", " read this ", " can you read ", " what color is this ", " what colour is this ",
+        " what does this say ", " who is this ", " whos this ", " how do i look ", " what am i wearing ",
+        " whats in front of you ", " what is in front of you ",
+    };
+    for (const char* p : kPhrases) {
+        std::string phrase = p;
+        // Match on word boundaries: the phrases carry their own spaces.
+        if (h.find(phrase) != std::string::npos) return true;
+    }
+    return false;
+}
+
+bool isPhotoRequest(const std::string& heard) {
+    const std::string h = " " + normalizeSpeech(heard) + " ";
+    static const char* const kPhrases[] = {" take a picture ", " take a photo ", " take a selfie ", " take a pic ",
+                                           " take my picture ", " take my photo ", " say cheese ", " snap a photo ",
+                                           " snap a picture "};
+    for (const char* p : kPhrases)
+        if (h.find(p) != std::string::npos) return true;
+    return false;
+}

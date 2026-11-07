@@ -211,7 +211,8 @@ static bool createAfe(srmodel_list_t* models, const char* format) {
 }
 
 bool voiceStart(QueueHandle_t events,
-                const std::vector<std::pair<VoiceCommand, std::string>>& extraPhrases, bool twoMics) {
+                const std::vector<std::pair<VoiceCommand, std::string>>& extraPhrases, bool twoMics,
+                int detectCore) {
     s_events = events;
 
     srmodel_list_t* models = esp_srmodel_init("model");
@@ -266,8 +267,10 @@ bool voiceStart(QueueHandle_t events,
 
     // Single-mic speech fits on core 0 next to face detection (lower
     // priority), leaving core 1 to drawing, sound and the camera driver.
-    // Two-mic mode is too heavy for one core, so it splits across both.
+    // Two-mic mode is too heavy for one core next to face detection, so it
+    // splits across both then; without face tracking core 0 has room.
     xTaskCreatePinnedToCore(feedTask, "sr_feed", 4096, nullptr, 5, nullptr, 0);
-    xTaskCreatePinnedToCore(detectTask, "sr_detect", 8192, nullptr, 5, nullptr, twoMics ? 1 : 0);
+    xTaskCreatePinnedToCore(detectTask, "sr_detect", 8192, nullptr, 5, nullptr, twoMics ? detectCore : 0);
+    ESP_LOGI(TAG, "recognizer on core %d", twoMics ? detectCore : 0);
     return true;
 }

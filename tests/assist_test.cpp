@@ -194,6 +194,23 @@ static void test_speech_shaper() {
     for (int i = 0; i < rate; ++i) CHECK(abs((int)loud[i]) <= 32767 * 0.98 + 1);
 }
 
+static void test_vision_requests() {
+    CHECK(isVisionRequest("What do you see?"));
+    CHECK(isVisionRequest(" Hey buddy, what am I holding in my hand?"));
+    CHECK(isVisionRequest("What's this?"));
+    CHECK(isVisionRequest("Can you read this for me?"));
+    CHECK(isVisionRequest("Look at this!"));
+    CHECK(isVisionRequest("How do I look today?"));
+    CHECK(!isVisionRequest("What is the tallest mountain?"));
+    CHECK(!isVisionRequest("Tell me a joke"));
+    CHECK(!isVisionRequest("What is thistle?"));  // word boundaries
+    CHECK(!isVisionRequest(""));
+    CHECK(isPhotoRequest("Take a picture of me!"));
+    CHECK(isPhotoRequest("Hey buddy, can you take a selfie?"));
+    CHECK(!isPhotoRequest("What's a good camera to take pictures with?"));
+    CHECK(!isVisionRequest("Take a picture of me!"));
+}
+
 int main() {
     test_split_leading_tag();
     test_split_no_tag();
@@ -209,6 +226,7 @@ int main() {
     test_wav_stereo_mixed();
     test_wav_rejects_junk();
     test_speech_shaper();
+    test_vision_requests();
     if (failures) {
         printf("assist tests: %d failure(s)\n", failures);
         return 1;

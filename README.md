@@ -38,6 +38,26 @@ Fill in `wifi_name`, `wifi_password`, `ha_url` and `ha_token` in `settings.txt`
 (see [Settings](#settings-microsd-card)). Keep the card private: the token works
 like a password for the Home Assistant user it belongs to.
 
+## Taking pictures and seeing
+
+The camera stays off until you ask for it (with `face_tracking = off`, the
+default since tracking costs a lot of CPU for little movement on this screen).
+
+- **"Take a picture"** (or "take a photo of me", "say cheese"): the screen shows
+  the camera's view with a 3-2-1 countdown, flashes, shows the photo, and saves
+  it as `photos/IMG_0001.jpg`, `IMG_0002.jpg`... (640x480) on the SD card.
+  Works without Wi-Fi.
+- **"What do you see?"**, "what am I holding?", "can you read this?", "how do I
+  look?": it takes a photo and sends it, with your question, to a vision model
+  in Ollama on your PC, then says the answer with a matching face. For about a
+  minute afterwards, follow-up questions ("what colour is it?") are about the
+  same photo. Photos taken just to look aren't saved.
+
+Vision setup (once): on the PC run `ollama pull gemma3:4b`, then set
+`vision_url` to Ollama's address (the same one Home Assistant uses, e.g.
+`http://192.168.4.98:11434`) in settings.txt. Any Ollama vision model works
+(`vision_model`); gemma3:4b fits next to the chat model on a 12 GB card.
+
 ## Voice commands
 
 Say **"Hey Buddy"**. The face switches to its listening look, and you then have
@@ -63,6 +83,8 @@ compliments) are answered by the AI instead:
 | be quiet / quiet please | Turns its sounds off (remembered after a restart) |
 | louder / speak up / turn it up / volume up / talk louder | Volume up 10 (saved to `volume` in settings.txt) |
 | quieter / turn it down / volume down / talk quieter | Volume down 10 (saved too; never below 10) |
+| take a picture / take a photo / take a selfie / say cheese | Live view with a countdown, then saves `photos/IMG_0001.jpg`... on the SD card |
+| what do you see / what is this / what am I holding / look at this | Takes a photo and describes it out loud (needs the AI and a vision model, see below) |
 | sound on / you can talk | Turns its sounds back on |
 
 If it doesn't catch a command, it looks confused for a moment.
@@ -280,6 +302,7 @@ and restart the buddy.
 | `ha_pipeline` | The voice assistant to use, by its name in Home Assistant (default `Buddy`) |
 | `conversation` | `off` uses only the built-in commands, even with the above filled in |
 | `follow_up` | `off` makes it go back to waiting for "Hey Buddy" after each answer |
+| `vision_url`, `vision_model` | Ollama's address and a vision model, for "what do you see?" |
 
 When an update adds new settings, they're added to the end of your
 `settings.txt` (at their default values, with their explanations) the next

@@ -259,6 +259,8 @@ static void handleVoice(uint32_t now) {
     }
 }
 
+static void startPhoto(bool look, const std::string& question, bool fromConversation, uint32_t now);
+
 // The AI conversation: thinking, the answer's mood, the mouth while it speaks.
 static void handleAssistant(uint32_t now) {
     if (!aiStarted.load()) return;
@@ -278,6 +280,7 @@ static void handleAssistant(uint32_t now) {
                 break;
             case AssistEvent::Error: buddy.onAssistantError(now); break;
             case AssistEvent::WakeAgain: buddy.onWakeWord(now); break;
+            case AssistEvent::Look: startPhoto(true, ev.text, true, now); break;
         }
     }
     buddy.setSpeaking(soundSpeaking(), soundSpeechLevel());
@@ -286,7 +289,9 @@ static void handleAssistant(uint32_t now) {
 // Loading the speech models takes a few seconds, so do it off the UI task
 // and let the face animate meanwhile.
 static void voiceInitTask(void*) {
-    if (voiceStart(voiceEvents, config.extraPhrases, config.twoMicrophones)) voiceOk.store(true);
+    // Two-mic mode: core 0 when face tracking is off (core 1 is busy drawing).
+    const int detectCore = config.faceTracking ? 1 : 0;
+    if (voiceStart(voiceEvents, config.extraPhrases, config.twoMicrophones, detectCore)) voiceOk.store(true);
     else ESP_LOGW(TAG, "voice disabled; touch and motion still work");
 
     // The AI connection (Wi-Fi itself started at boot, see app_main).
@@ -297,6 +302,8 @@ static void voiceInitTask(void*) {
         ac.pipeline = config.haPipeline;
         ac.followUp = config.followUp;
         ac.extraPhrases = config.extraPhrases;
+        ac.visionUrl = config.visionUrl;
+        ac.visionModel = config.visionModel;
         aiStarted.store(assistantStart(ac, assistEvents));
     }
     vTaskDelete(nullptr);
@@ -373,6 +380,103 @@ static void drawCameraPreview() {
     canvas.setCursor(4, 4);
     canvas.printf("camera preview  %s", f.found ? "FACE" : "no face");
     canvas.pushSprite(0, 0);
+}
+
+// ---------------------------------------------------------------------------
+// "Take a picture" / "what do you see?": the camera takes over the screen for
+// a few seconds (live view, countdown, flash, the photo), then the face is back.
+
+static struct {
+    enum Stage { Idle, Live, Show } stage = Idle;
+    bool look = false;              // describe it (vision) rather than save it
+    bool fromConversation = false;  // an AI turn is waiting for the answer
+    std::string question;
+    std::string caption;
+    uint32_t since = 0;
+    uint16_t* frame = nullptr;      // kPhotoW x kPhotoH, big-endian RGB565
+} photo;
+
+static void startPhoto(bool look, const std::string& question, bool fromConversation, uint32_t now) {
+    if (photo.stage != photo.Idle || (!photo.frame && !(photo.frame = (uint16_t*)heap_caps_malloc(
+                                                           kPhotoW * kPhotoH * 2, MALLOC_CAP_SPIRAM))) ||
+        !photoBegin()) {
+        ESP_LOGW(TAG, "couldn't start the camera for a photo");
+        if (look && fromConversation) assistantLook(nullptr, 0, question, true);
+        buddy.onAssistantError(now);
+        return;
+    }
+    photo.stage = photo.Live;
+    photo.look = look;
+    photo.fromConversation = fromConversation;
+    photo.question = question;
+    photo.since = now;
+    ESP_LOGI(TAG, "camera on for a %s", look ? "look" : "photo");
+}
+
+static void drawCaption(const char* text, int size, int y) {
+    canvas.setTextSize(size);
+    canvas.setTextDatum(textdatum_t::top_center);
+    canvas.setTextColor(TFT_BLACK);
+    canvas.drawString(text, kPhotoW / 2 + 2, y + 2);  // shadow, readable on any photo
+    canvas.setTextColor(TFT_WHITE);
+    canvas.drawString(text, kPhotoW / 2, y);
+}
+
+// Runs the photo screens; true while it owns the display (the face isn't drawn).
+static bool runPhoto(uint32_t now) {
+    if (photo.stage == photo.Idle) return false;
+    const uint32_t t = now - photo.since;
+    if (photo.stage == photo.Live) {
+        // Live view: time to aim (and for the camera's exposure to settle).
+        const uint32_t liveMs = photo.look ? 1800 : 3000;
+        if (photoPreview(photo.frame)) canvas.pushImage(0, 0, kPhotoW, kPhotoH, photo.frame);
+        if (photo.look) {
+            drawCaption("Let me see...", 2, 8);
+        } else {
+            drawCaption("Say cheese!", 2, 8);
+            const int left = (int)((liveMs - (t < liveMs ? t : liveMs) + 999) / 1000);
+            if (left > 0) drawCaption(std::to_string(left).c_str(), 6, 90);
+        }
+        canvas.pushSprite(0, 0);
+        if (t < liveMs) return true;
+
+        // Click.
+        uint8_t* jpeg = nullptr;
+        size_t len = 0;
+        const bool ok = photoCapture(&jpeg, &len, photo.frame);
+        photoEnd();
+        canvas.fillScreen(TFT_WHITE);  // flash
+        canvas.pushSprite(0, 0);
+        if (!buddy.isMuted()) soundPlay(Sfx::Boop);
+        if (!ok) {
+            photo.caption = "Oops, no photo";
+            heap_caps_free(jpeg);
+            if (photo.look && photo.fromConversation) assistantLook(nullptr, 0, photo.question, true);
+            buddy.onAssistantError(now);
+        } else if (!photo.look) {
+            const std::string name = sdcardSavePhoto(jpeg, len);
+            heap_caps_free(jpeg);
+            photo.caption = !sdcardMounted() ? "No SD card to save it on" : name.empty() ? "Couldn't save it" : name;
+            if (!name.empty()) ESP_LOGI(TAG, "saved photos/%s", name.c_str());
+        } else if (aiStarted.load() && assistantCanSee()) {
+            photo.caption = "Hmm...";
+            assistantLook(jpeg, len, photo.question, photo.fromConversation);  // takes the JPEG
+        } else {
+            heap_caps_free(jpeg);
+            photo.caption = "I need the AI to tell you";
+            if (photo.fromConversation) assistantLook(nullptr, 0, photo.question, true);
+        }
+        photo.stage = photo.Show;
+        photo.since = now;
+        vTaskDelay(pdMS_TO_TICKS(80));  // let the flash be seen
+        return true;
+    }
+    // The photo, briefly.
+    canvas.pushImage(0, 0, kPhotoW, kPhotoH, photo.frame);
+    drawCaption(photo.caption.c_str(), 2, kPhotoH - 28);
+    canvas.pushSprite(0, 0);
+    if (t >= (photo.look ? 1500u : 2500u)) photo.stage = photo.Idle;
+    return true;
 }
 
 // "Louder" / "quieter": 10 steps at a time, saved into settings.txt a few
@@ -462,6 +566,11 @@ static void uiTask(void*) {
             settingsSetBool("muted", savedMuted);
         }
         handleVolumeChange(now);
+        switch (buddy.takeCameraRequest()) {  // "take a picture" / offline "what is this"
+            case Companion::CameraRequest::Photo: startPhoto(false, "", false, now); break;
+            case Companion::CameraRequest::Look: startPhoto(true, "What do you see?", false, now); break;
+            default: break;
+        }
         soundPlay(buddy.takeSound());  // after the volume change, so "louder" chirps at the new level
         if (buddy.wantsDim() != dimmed) {
             dimmed = buddy.wantsDim();
@@ -474,7 +583,9 @@ static void uiTask(void*) {
             face.update(now - lastFrame);
             lastFrame = now;
             ++frames;
-            if (config.cameraPreview) {
+            if (runPhoto(now)) {
+                // the camera has the screen
+            } else if (config.cameraPreview) {
                 drawCameraPreview();
             } else {
                 face.draw(canvasAdapter);

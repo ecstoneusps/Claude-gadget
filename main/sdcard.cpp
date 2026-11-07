@@ -1,6 +1,7 @@
 #include "sdcard.h"
 
 #include <stdio.h>
+#include <dirent.h>
 #include <sys/stat.h>
 
 #include "driver/sdspi_host.h"
@@ -66,4 +67,35 @@ bool sdcardWriteFile(const char* path, const std::string& data) {
     if (!f) return false;
     const bool ok = fwrite(data.data(), 1, data.size(), f) == data.size();
     return fclose(f) == 0 && ok;
+}
+
+std::string sdcardSavePhoto(const uint8_t* jpeg, size_t len) {
+    if (!s_card || !jpeg || len == 0) return "";
+    const std::string dir = fullPath("photos");
+    mkdir(dir.c_str(), 0775);  // fine if it's already there
+    // Next number after the highest IMG_NNNN.jpg in the folder (so deleting
+    // old photos never makes a new one overwrite another).
+    int highest = 0;
+    if (DIR* d = opendir(dir.c_str())) {
+        while (dirent* e = readdir(d)) {
+            int n = 0;
+            if (sscanf(e->d_name, "IMG_%d.", &n) == 1 || sscanf(e->d_name, "img_%d.", &n) == 1)
+                if (n > highest) highest = n;
+        }
+        closedir(d);
+    }
+    char name[32];
+    snprintf(name, sizeof name, "IMG_%04d.jpg", highest + 1);
+    const std::string path = dir + "/" + name;
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) {
+        ESP_LOGW(TAG, "couldn't create %s", path.c_str());
+        return "";
+    }
+    const bool ok = fwrite(jpeg, 1, len, f) == len;
+    if (fclose(f) != 0 || !ok) {
+        ESP_LOGW(TAG, "couldn't write %s (card full?)", path.c_str());
+        return "";
+    }
+    return name;
 }

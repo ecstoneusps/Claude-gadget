@@ -29,6 +29,8 @@ enum class VoiceCommand : int {
     BeSilly,
     VolumeUp,
     VolumeDown,
+    TakePicture,
+    LookAtThis,
     Count
 };
 
@@ -112,6 +114,14 @@ public:
         return s;
     }
     void setMuted(bool m) { muted_ = m; }
+    // "take a picture" / "what do you see": what the main loop should do with
+    // the camera (once).
+    enum class CameraRequest { None, Photo, Look };
+    CameraRequest takeCameraRequest() {
+        CameraRequest r = cameraRequest_;
+        cameraRequest_ = CameraRequest::None;
+        return r;
+    }
     // "louder" / "quieter": steps to change the speaker volume by (+/-), once.
     int takeVolumeChange() {
         int v = volumeChange_;
@@ -171,6 +181,7 @@ private:
 
     bool muted_ = false;
     int volumeChange_ = 0;
+    CameraRequest cameraRequest_ = CameraRequest::None;
     Sfx pending_ = Sfx::None;
     Sfx playing_ = Sfx::None;   // for lip-sync
     uint32_t soundStart_ = 0;

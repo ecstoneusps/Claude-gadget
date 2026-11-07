@@ -27,3 +27,13 @@ std::string normalizeSpeech(const std::string& text);
 // Whether recognized speech is exactly a command phrase, ignoring
 // punctuation, case, and a "hey buddy" / "buddy" / "please" around it.
 bool speechMatchesPhrase(const std::string& heard, const std::string& phrase);
+
+// Whether recognized speech asks the buddy to look at something with its
+// camera ("what do you see", "what am I holding", "can you read this"...),
+// anywhere in the sentence. Those questions go to the vision model with a
+// fresh photo instead of to the chat AI, which can't see.
+bool isVisionRequest(const std::string& heard);
+
+// Whether recognized speech asks for a photo ("take a picture of me",
+// "can you take a selfie"), anywhere in the sentence.
+bool isPhotoRequest(const std::string& heard);

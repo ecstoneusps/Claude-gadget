@@ -1,4 +1,5 @@
 #pragma once
+#include <stddef.h>
 #include <stdint.h>
 
 // CoreS3 camera (GC0308) + Espressif's on-device face detection model.
@@ -36,3 +37,16 @@ constexpr int kCamW = 160, kCamH = 120;
 // RGB565, as the camera delivers it) if a newer one arrived since the last call.
 void cameraEnablePreview();
 bool cameraCopyPreview(uint16_t* dst, uint32_t* seq);
+
+// Photos ("take a picture", "what do you see"): the camera runs at 640x480
+// only between photoBegin() and photoEnd() (face tracking, if on, pauses
+// meanwhile). Call these from one task.
+constexpr int kPhotoW = 320, kPhotoH = 240;  // live view / still size: the screen
+bool photoBegin();
+// Live view: the newest frame at half size into `dst` (kPhotoW x kPhotoH,
+// big-endian RGB565). False if no frame was ready.
+bool photoPreview(uint16_t* dst);
+// Takes the photo: a JPEG (heap_caps_malloc'd in PSRAM; caller frees) and,
+// if `still` isn't null, a half-size copy for showing it.
+bool photoCapture(uint8_t** jpeg, size_t* len, uint16_t* still);
+void photoEnd();

@@ -14,13 +14,14 @@
 #include "freertos/idf_additions.h"
 
 #include "human_face_detect.hpp"
+#include "img_converters.h"
 #include "i2c_bus.h"
 
 static const char* TAG = "camera";
 
 // GC0308 wiring on the CoreS3, from M5Stack's CoreS3 library
 // (github.com/m5stack/M5CoreS3, src/utility/GC0308.cpp).
-static camera_config_t makeConfig() {
+static camera_config_t makeConfig(framesize_t size = FRAMESIZE_QQVGA, int fbCount = 2) {
     camera_config_t c = {};
     c.pin_pwdn = -1;
     c.pin_reset = -1;
@@ -42,9 +43,9 @@ static camera_config_t makeConfig() {
     c.ledc_timer = LEDC_TIMER_0;
     c.ledc_channel = LEDC_CHANNEL_0;
     c.pixel_format = PIXFORMAT_RGB565;
-    c.frame_size = FRAMESIZE_QQVGA;  // 160x120, full field of view (subsample mode)
+    c.frame_size = size;  // QQVGA 160x120 for tracking (full field of view, subsample mode); VGA for photos
     c.jpeg_quality = 0;
-    c.fb_count = 2;
+    c.fb_count = fbCount;
     c.fb_location = CAMERA_FB_IN_PSRAM;
     // Always hand face detection the newest frame. (Capturing only on request
     // gave it stale frames, so it lagged far behind someone moving.)
@@ -59,7 +60,9 @@ static constexpr dl::image::pix_type_t kPixType = dl::image::DL_IMAGE_PIX_TYPE_R
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static FaceSighting s_latest = {};
 static std::atomic<uint32_t> s_intervalMs{200};
-static bool s_cameraOk = false;
+static bool s_cameraOk = false;            // started for face tracking / preview
+static std::atomic<bool> s_hold{false};    // face task: stop touching the camera (a photo is being taken)
+static std::atomic<bool> s_held{false};    // face task: ...and it has stopped
 static uint16_t* s_preview = nullptr;      // latest frame copy, only in preview mode
 static uint32_t s_previewSeq = 0;
 static SemaphoreHandle_t s_previewLock = nullptr;
@@ -143,6 +146,12 @@ static void faceTask(void* arg) {
     TickType_t lastHit = 0;
 
     while (true) {
+        if (s_hold.load()) {
+            s_held.store(true);
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+        s_held.store(false);
         const uint32_t interval = s_intervalMs.load();
         if (interval == 0) {
             vTaskDelay(pdMS_TO_TICKS(250));
@@ -237,4 +246,98 @@ FaceSighting faceTrackingLatest() {
     FaceSighting f = s_latest;
     taskEXIT_CRITICAL(&s_lock);
     return f;
+}
+
+// ---------------------------------------------------------------------------
+// Photos: the camera is started at 640x480 only while a photo is being taken.
+
+static bool s_photoOn = false;
+static bool s_photoPausedTracking = false;
+
+static void startCamera(framesize_t size, int fbCount) {
+    camera_config_t cfg = makeConfig(size, fbCount);
+    esp_err_t err = esp_camera_init(&cfg);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "camera start failed (%s)", esp_err_to_name(err));
+        return;
+    }
+    if (sensor_t* sen = esp_camera_sensor_get())
+        if (sen->set_ae_level) sen->set_ae_level(sen, 2);
+    if (size == FRAMESIZE_VGA) s_photoOn = true;
+}
+
+bool photoBegin() {
+    if (s_photoOn) return true;
+    if (!sharedI2cBus()) return false;
+    if (s_cameraOk) {
+        // Face tracking has the camera at 160x120: pause it and restart larger.
+        s_hold.store(true);
+        for (int i = 0; i < 60 && !s_held.load(); ++i) vTaskDelay(pdMS_TO_TICKS(25));
+        esp_camera_deinit();
+        s_photoPausedTracking = true;
+    }
+    // Two buffers so the live view always shows the newest frame (2 x 600 KB of PSRAM).
+    startCamera(FRAMESIZE_VGA, 2);
+    if (!s_photoOn) {
+        if (s_photoPausedTracking) {
+            startCamera(FRAMESIZE_QQVGA, 2);
+            s_photoPausedTracking = false;
+            s_hold.store(false);
+        }
+        return false;
+    }
+    return true;
+}
+
+// Half-size copy of a 640x480 frame (every other pixel and row), still
+// big-endian RGB565, brightened like the face detector's frames.
+static void halve(const camera_fb_t* fb, uint16_t* dst) {
+    const uint16_t* src = (const uint16_t*)fb->buf;
+    const int w = fb->width / 2, h = fb->height / 2;
+    for (int y = 0; y < h; ++y) {
+        const uint16_t* row = src + (2 * y) * fb->width;
+        uint16_t* out = dst + y * w;
+        for (int x = 0; x < w; ++x) out[x] = row[2 * x];
+    }
+    autoBrighten((uint8_t*)dst, (size_t)w * h);
+}
+
+bool photoPreview(uint16_t* dst) {
+    if (!s_photoOn) return false;
+    camera_fb_t* fb = esp_camera_fb_get();
+    if (!fb) return false;
+    const bool ok = fb->width == kPhotoW * 2 && fb->height == kPhotoH * 2;
+    if (ok) halve(fb, dst);
+    esp_camera_fb_return(fb);
+    return ok;
+}
+
+bool photoCapture(uint8_t** jpeg, size_t* len, uint16_t* still) {
+    *jpeg = nullptr;
+    *len = 0;
+    if (!s_photoOn) return false;
+    // The buffers may hold frames from before you said "cheese": skip them.
+    for (int i = 0; i < 2; ++i)
+        if (camera_fb_t* old = esp_camera_fb_get()) esp_camera_fb_return(old);
+    camera_fb_t* fb = esp_camera_fb_get();
+    if (!fb) return false;
+    if (still) halve(fb, still);
+    const int64_t t0 = esp_timer_get_time();
+    const int mean = autoBrighten(fb->buf, (size_t)fb->width * fb->height);
+    const bool ok = frame2jpg(fb, 80, jpeg, len);
+    ESP_LOGI(TAG, "photo %ux%u: %u KB JPEG in %d ms (brightness %d/63 before boosting)", fb->width, fb->height,
+             (unsigned)(*len / 1024), (int)((esp_timer_get_time() - t0) / 1000), mean);
+    esp_camera_fb_return(fb);
+    return ok;
+}
+
+void photoEnd() {
+    if (!s_photoOn) return;
+    esp_camera_deinit();
+    s_photoOn = false;
+    if (s_photoPausedTracking) {
+        startCamera(FRAMESIZE_QQVGA, 2);
+        s_photoPausedTracking = false;
+        s_hold.store(false);
+    }
 }
