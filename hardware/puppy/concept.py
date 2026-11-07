@@ -39,18 +39,36 @@ head_y0, head_y1 = -FRONT, CORE_D + CHANNEL + BACK
 head_z0 = HEAD_Z0
 head_z1 = HEAD_Z0 + BOTTOM + CORE_H + CHAMBER + TOP
 
-head = rbox(-head_x, head_x, head_y0, head_y1, head_z0, head_z1, 12)
-cavity = rbox(-CORE_W / 2, CORE_W / 2, 0, CORE_D + CHANNEL, head_z0 + BOTTOM,
-              head_z0 + BOTTOM + CORE_H + CHAMBER, 3)
+# Head = hull of spheres: tighter rounding around the screen (lower part),
+# a big soft dome on top. The inside is the same hull with every sphere
+# shrunk by the wall thickness, so the walls stay even all round.
+def head_spheres(shrink):
+    lo_r, hi_r = 10.0, 24.0
+    pts = []
+    for x in (-1, 1):
+        for y, yr in ((head_y0, 1), (head_y1, -1)):
+            # lower corners (around the screen and the bottom)
+            pts.append((x * (head_x - lo_r), y + yr * lo_r, head_z0 + lo_r, lo_r - shrink))
+            # where the dome starts, level with the top of the screen
+            pts.append((x * (head_x - lo_r), y + yr * lo_r, head_z0 + BOTTOM + CORE_H, lo_r - shrink))
+            # the dome
+            pts.append((x * (head_x - hi_r), y + yr * hi_r, head_z1 - hi_r, hi_r - shrink))
+    return [p for p in pts if p[3] > 0]
+
+WALL_SHELL = 3.0
+head = blob(head_spheres(0))
+dome_inside = blob(head_spheres(WALL_SHELL)) - Manifold.cube((300, 300, 300)).translate(
+    (-150, -150, head_z0 + BOTTOM + CORE_H - 300))   # only above the CoreS3
+pocket = rbox(-CORE_W / 2, CORE_W / 2, 0, CORE_D + CHANNEL, head_z0 + BOTTOM, head_z0 + BOTTOM + CORE_H + 1, 4)
 screen = Manifold.cube((50.0, 10, 51.2)).translate((-25.0, head_y0 - 5, head_z0 + BOTTOM + 1.8))
-head = head - cavity - screen
+head = head - pocket - dome_inside - screen
 
 # --- Floppy ears: flat leaves from the upper back of the head, hanging down --
 def ear(side):
-    leaf = blob([(0, 0, 0, 8), (side * 6, 0, -20, 11), (side * 7, 0, -34, 9)]).scale((1, 0.32, 1))
+    leaf = blob([(0, 0, 0, 8), (side * 6, 0, -22, 11), (side * 8, 0, -40, 9.5)]).scale((1, 0.32, 1))
     # tilt the bottom of the ear outward a little
     leaf = leaf.rotate((0, -side * 12, 0))
-    return leaf.translate((side * (head_x - 3), 24, head_z1 - 8))
+    return leaf.translate((side * (head_x - 4), 24, head_z1 - 16))
 
 ears = ear(-1) + ear(1)
 
@@ -79,9 +97,24 @@ for p in paws + hinds:
 # flat bottom so it sits on the desk
 puppy = puppy - Manifold.cube((300, 300, 50)).translate((-150, -150, -50))
 
-mesh = puppy.to_mesh()
-tm = trimesh.Trimesh(vertices=np.asarray(mesh.vert_properties)[:, :3], faces=np.asarray(mesh.tri_verts))
+# Paw pads: a separate piece so it can be printed in its own colour.
+pads = None
+for side in (-1, 1):
+    big = Manifold.sphere(5.2, SEG).scale((1, 0.35, 0.8)).translate((side * 13, -14.3, 6))
+    toes = [Manifold.sphere(2.1, SEG).scale((1, 0.4, 1)).translate((side * 13 + dx, -13.4, 12.2 + dz))
+            for dx, dz in ((-4.2, -0.6), (0, 0.8), (4.2, -0.6))]
+    piece = big + toes[0] + toes[1] + toes[2]
+    pads = piece if pads is None else pads + piece
+
+
+def save(m, out):
+    mesh = m.to_mesh()
+    tm = trimesh.Trimesh(vertices=np.asarray(mesh.vert_properties)[:, :3], faces=np.asarray(mesh.tri_verts))
+    tm.export(out)
+    lo, hi = tm.bounds
+    print(f"{out}: {hi[0]-lo[0]:.0f} x {hi[1]-lo[1]:.0f} x {hi[2]-lo[2]:.0f} mm, {len(tm.faces)} faces")
+
+
 out = sys.argv[1] if len(sys.argv) > 1 else "puppy_concept.stl"
-tm.export(out)
-lo, hi = tm.bounds
-print(f"concept: {hi[0]-lo[0]:.0f} x {hi[1]-lo[1]:.0f} x {hi[2]-lo[2]:.0f} mm, {len(tm.faces)} faces -> {out}")
+save(puppy - pads, out)
+save(pads, out.replace(".stl", "_pads.stl"))
