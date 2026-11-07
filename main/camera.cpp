@@ -265,8 +265,17 @@ static void startCamera(framesize_t size, int fbCount) {
         ESP_LOGW(TAG, "camera start failed (%s)", esp_err_to_name(err));
         return;
     }
-    if (sensor_t* sen = esp_camera_sensor_get())
+    if (sensor_t* sen = esp_camera_sensor_get()) {
         if (sen->set_ae_level) sen->set_ae_level(sen, 2);
+        if (size != FRAMESIZE_QQVGA && sen->set_reg) {
+            // Halve the sensor's pixel clock (GC0308 register 0x28, bits 6:4 =
+            // divider - 1, as the driver does on the original ESP32). At full
+            // speed, 640x480 frames streaming into PSRAM next to the display
+            // and speech fell behind: wavy lines and scrambled colors.
+            sen->set_reg(sen, 0xfe, 0xff, 0x00);  // register page 0
+            sen->set_reg(sen, 0x28, 0x70, 0x10);
+        }
+    }
     if (size != FRAMESIZE_QQVGA) s_photoOn = true;
 }
 
