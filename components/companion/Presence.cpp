@@ -3,6 +3,9 @@
 PresenceDetector::Event PresenceDetector::update(uint16_t raw, uint32_t now) {
     const float v = raw;
     if (!started_) {
+        // The sensor reads 0 until its first measurement is done; learning
+        // that as the empty desk made every real reading look like a person.
+        if (raw == 0) return Event::None;
         started_ = true;
         baseline_ = v;
         farSince_ = now;

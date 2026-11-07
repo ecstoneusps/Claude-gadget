@@ -50,6 +50,9 @@ void radarBegin() {
         return;
     }
     applyPins();
+    // Swapping RX/TX re-claims pins the driver already holds, which it warns
+    // about every time ("GPIO 17 is not usable"): expected here, so hush it.
+    esp_log_level_set("uart", ESP_LOG_ERROR);
     s_open = true;
     ESP_LOGI(TAG, "listening on Port C (GPIO %d receive, %d send, %d baud)", s_rx, s_tx, kBaud);
 }
@@ -70,7 +73,9 @@ void radarPoll(uint32_t now) {
     }
     // Nothing yet: maybe RX and TX are the other way round. Keep alternating
     // (cheap) so a radar plugged in later is picked up too.
-    if (!s_found && now - s_triedSince > kSwapAfterMs) {
+    // After the first minute, try the other wiring only every 30 s.
+    const uint32_t swapAfter = s_swaps < 24 ? kSwapAfterMs : 30000;
+    if (!s_found && now - s_triedSince > swapAfter) {
         s_swapped = !s_swapped;
         s_triedSince = now;
         applyPins();

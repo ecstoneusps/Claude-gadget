@@ -255,6 +255,10 @@ static bool s_photoOn = false;
 static bool s_photoPausedTracking = false;
 
 static void startCamera(framesize_t size, int fbCount) {
+    // Photos: the camera writes straight into the PSRAM frame buffers. The
+    // small internal DMA buffer (8 KB, to leave room for Wi-Fi) overflowed at
+    // 640x480 and no frame ever completed.
+    esp_camera_set_psram_mode(size != FRAMESIZE_QQVGA);
     camera_config_t cfg = makeConfig(size, fbCount);
     esp_err_t err = esp_camera_init(&cfg);
     if (err != ESP_OK) {
@@ -263,7 +267,17 @@ static void startCamera(framesize_t size, int fbCount) {
     }
     if (sensor_t* sen = esp_camera_sensor_get())
         if (sen->set_ae_level) sen->set_ae_level(sen, 2);
-    if (size == FRAMESIZE_VGA) s_photoOn = true;
+    if (size != FRAMESIZE_QQVGA) s_photoOn = true;
+}
+
+// A frame if one is ready within `waitMs`, without blocking longer (the
+// driver's own wait is 4 s, which froze the screen).
+static camera_fb_t* frameWithin(uint32_t waitMs) {
+    for (uint32_t waited = 0; !esp_camera_available_frames(); waited += 10) {
+        if (waited >= waitMs) return nullptr;
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return esp_camera_fb_get();
 }
 
 bool photoBegin() {
@@ -276,8 +290,20 @@ bool photoBegin() {
         esp_camera_deinit();
         s_photoPausedTracking = true;
     }
-    // Two buffers so the live view always shows the newest frame (2 x 600 KB of PSRAM).
+    // Two buffers so the live view always shows the newest frame (2 x 600 KB
+    // of PSRAM). If 640x480 doesn't deliver frames, settle for 320x240.
     startCamera(FRAMESIZE_VGA, 2);
+    if (s_photoOn) {
+        camera_fb_t* fb = frameWithin(1500);
+        if (fb) {
+            esp_camera_fb_return(fb);
+        } else {
+            ESP_LOGW(TAG, "no frames at 640x480; using 320x240");
+            esp_camera_deinit();
+            s_photoOn = false;
+            startCamera(FRAMESIZE_QVGA, 2);
+        }
+    }
     if (!s_photoOn) {
         if (s_photoPausedTracking) {
             startCamera(FRAMESIZE_QQVGA, 2);
@@ -289,25 +315,26 @@ bool photoBegin() {
     return true;
 }
 
-// Half-size copy of a 640x480 frame (every other pixel and row), still
-// big-endian RGB565, brightened like the face detector's frames.
-static void halve(const camera_fb_t* fb, uint16_t* dst) {
+// Screen-size copy of a frame (640x480: every other pixel and row; 320x240:
+// as is), still big-endian RGB565, brightened like the face detector's frames.
+static bool toScreen(const camera_fb_t* fb, uint16_t* dst) {
+    const int step = fb->width / kPhotoW;
+    if (step < 1 || fb->width != kPhotoW * step || fb->height != kPhotoH * step) return false;
     const uint16_t* src = (const uint16_t*)fb->buf;
-    const int w = fb->width / 2, h = fb->height / 2;
-    for (int y = 0; y < h; ++y) {
-        const uint16_t* row = src + (2 * y) * fb->width;
-        uint16_t* out = dst + y * w;
-        for (int x = 0; x < w; ++x) out[x] = row[2 * x];
+    for (int y = 0; y < kPhotoH; ++y) {
+        const uint16_t* row = src + (step * y) * fb->width;
+        uint16_t* out = dst + y * kPhotoW;
+        for (int x = 0; x < kPhotoW; ++x) out[x] = row[step * x];
     }
-    autoBrighten((uint8_t*)dst, (size_t)w * h);
+    autoBrighten((uint8_t*)dst, (size_t)kPhotoW * kPhotoH);
+    return true;
 }
 
 bool photoPreview(uint16_t* dst) {
-    if (!s_photoOn) return false;
+    if (!s_photoOn || !esp_camera_available_frames()) return false;  // never wait: the screen keeps drawing
     camera_fb_t* fb = esp_camera_fb_get();
     if (!fb) return false;
-    const bool ok = fb->width == kPhotoW * 2 && fb->height == kPhotoH * 2;
-    if (ok) halve(fb, dst);
+    const bool ok = toScreen(fb, dst);
     esp_camera_fb_return(fb);
     return ok;
 }
@@ -316,12 +343,13 @@ bool photoCapture(uint8_t** jpeg, size_t* len, uint16_t* still) {
     *jpeg = nullptr;
     *len = 0;
     if (!s_photoOn) return false;
-    // The buffers may hold frames from before you said "cheese": skip them.
-    for (int i = 0; i < 2; ++i)
-        if (camera_fb_t* old = esp_camera_fb_get()) esp_camera_fb_return(old);
-    camera_fb_t* fb = esp_camera_fb_get();
-    if (!fb) return false;
-    if (still) halve(fb, still);
+    // The live view keeps taking frames, so the next one is fresh.
+    camera_fb_t* fb = frameWithin(1500);
+    if (!fb) {
+        ESP_LOGW(TAG, "photo: no frame from the camera");
+        return false;
+    }
+    if (still) toScreen(fb, still);
     const int64_t t0 = esp_timer_get_time();
     const int mean = autoBrighten(fb->buf, (size_t)fb->width * fb->height);
     const bool ok = frame2jpg(fb, 80, jpeg, len);
@@ -335,6 +363,7 @@ void photoEnd() {
     if (!s_photoOn) return;
     esp_camera_deinit();
     s_photoOn = false;
+    esp_camera_set_psram_mode(false);
     if (s_photoPausedTracking) {
         startCamera(FRAMESIZE_QQVGA, 2);
         s_photoPausedTracking = false;

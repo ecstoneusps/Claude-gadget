@@ -616,6 +616,15 @@ static void test_camera_commands() {
     CHECK(isActionCommand(VoiceCommand::TakePicture) && isActionCommand(VoiceCommand::LookAtThis));
 }
 
+static void test_presence_ignores_zero_at_start() {
+    PresenceDetector p;
+    uint32_t t = 0;
+    for (int i = 0; i < 5; ++i, t += 50) CHECK(p.update(0, t) == PresenceDetector::Event::None);
+    for (int i = 0; i < 100; ++i, t += 50) CHECK(p.update(85, t) == PresenceDetector::Event::None);
+    CHECK(!p.present());
+    CHECK(p.baseline() > 80 && p.baseline() < 90);
+}
+
 static void test_action_commands() {
     CHECK(isActionCommand(VoiceCommand::Wink));
     CHECK(isActionCommand(VoiceCommand::GoodNight));
@@ -671,6 +680,7 @@ int main() {
         {"action commands", test_action_commands},
         {"volume commands", test_volume_commands},
         {"camera commands", test_camera_commands},
+        {"presence ignores zero readings at start", test_presence_ignores_zero_at_start},
     };
     for (auto& t : tests) {
         int before = failures;

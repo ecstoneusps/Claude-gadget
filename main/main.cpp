@@ -429,7 +429,14 @@ static bool runPhoto(uint32_t now) {
     if (photo.stage == photo.Live) {
         // Live view: time to aim (and for the camera's exposure to settle).
         const uint32_t liveMs = photo.look ? 1800 : 3000;
-        if (photoPreview(photo.frame)) canvas.pushImage(0, 0, kPhotoW, kPhotoH, photo.frame);
+        static bool gotFrame = false;
+        if (t == 0 || t < kFrameMs) gotFrame = false;
+        if (photoPreview(photo.frame)) {
+            gotFrame = true;
+            canvas.pushImage(0, 0, kPhotoW, kPhotoH, photo.frame);
+        } else if (!gotFrame) {
+            canvas.fillScreen(TFT_BLACK);  // until the first frame
+        }
         if (photo.look) {
             drawCaption("Let me see...", 2, 8);
         } else {
