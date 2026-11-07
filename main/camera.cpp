@@ -339,10 +339,17 @@ bool photoPreview(uint16_t* dst) {
     return ok;
 }
 
-bool photoCapture(uint8_t** jpeg, size_t* len, uint16_t* still) {
+bool photoCapture(uint8_t** jpeg, size_t* len, uint16_t* still, bool fresh) {
     *jpeg = nullptr;
     *len = 0;
     if (!s_photoOn) return false;
+    if (fresh) {
+        // Frames waiting in the buffers were taken before the flash, and the
+        // next one may have started before it (half lit): skip them all.
+        while (esp_camera_available_frames())
+            if (camera_fb_t* old = esp_camera_fb_get()) esp_camera_fb_return(old);
+        if (camera_fb_t* half = frameWithin(1000)) esp_camera_fb_return(half);
+    }
     // The live view keeps taking frames, so the next one is fresh.
     camera_fb_t* fb = frameWithin(1500);
     if (!fb) {

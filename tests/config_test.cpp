@@ -34,6 +34,7 @@ static void test_default_file_round_trips() {
     CHECK(cfg.proximity == d.proximity && cfg.proximitySensitivity == d.proximitySensitivity);
     CHECK(cfg.flipTiltX == d.flipTiltX && cfg.flipTiltY == d.flipTiltY);
     CHECK(cfg.radar && cfg.radarDistanceCm == 150);
+    CHECK(!cfg.photoFlash);
     CHECK(cfg.extraPhrases.empty());  // examples are commented out
     CHECK(cfg.wifiName.empty() && cfg.wifiPassword.empty() && cfg.haUrl.empty() && cfg.haToken.empty());
     CHECK(cfg.haPipeline == "Buddy");
@@ -235,6 +236,8 @@ static void test_vision_settings() {
 static void test_radar_settings() {
     BuddyConfig cfg;
     std::vector<std::string> w;
+    parseConfig("photo_flash = on\n", cfg, w);
+    CHECK(cfg.photoFlash && w.empty());
     parseConfig("radar = off\nradar_distance_cm = 90\nradar_distance_cm = 5\n", cfg, w);
     CHECK(!cfg.radar && cfg.radarDistanceCm == 90);
     CHECK(w.size() == 2);  // "set again" and "must be 30-600"

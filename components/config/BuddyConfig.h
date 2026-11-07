@@ -32,6 +32,7 @@ struct BuddyConfig {
     // on this board). On hardware the fast one followed a face better overall,
     // and the accurate one slowed the face animation (shared PSRAM bandwidth).
     bool accurateFaceModel = false;
+    bool photoFlash = false;       // light the screen up white while a photo is taken
 
     // Proximity sensor
     bool proximity = true;

@@ -167,6 +167,8 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
             if (v == "accurate") cfg.accurateFaceModel = true;
             else if (v == "fast") cfg.accurateFaceModel = false;
             else bad("must be accurate or fast");
+        } else if (key == "photo_flash") {
+            if (!parseBool(val, cfg.photoFlash)) bad("must be on or off");
         } else if (key == "camera_preview") {
             if (!parseBool(val, cfg.cameraPreview)) bad("must be on or off");
         } else if (key == "face_gaze") {
@@ -432,6 +434,7 @@ std::string defaultConfigText() {
     snprintf(buf, sizeof buf, "%-28s = %-6s # %s", "face_model", d.accurateFaceModel ? "accurate" : "fast",
              "fast checks ~14 times a second; accurate finds you more often per check but is ~7x slower");
     add(buf);
+    onoff("photo_flash", d.photoFlash, "screen lights up white for photos (brighter close-ups; shiny things reflect)");
     onoff("camera_preview", d.cameraPreview, "show what the camera sees (green box = face found) instead of the face");
     add("");
     add("# --- Proximity sensor (above the screen) ---");

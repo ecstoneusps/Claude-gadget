@@ -292,6 +292,7 @@ and restart the buddy.
 | `say.<command> = phrase, phrase` | Extra ways to say any command, e.g. `say.hello = howdy, whats up buddy` |
 | `face_tracking`, `camera_mirrored`, `face_gaze` | Camera on/off, fix eyes that look away from you, how far they turn |
 | `face_model` | `fast` (MSR+MNP, default) checks about 14 times a second; `accurate` (ESPDet-Pico) finds you more often per check but takes ~0.5 s each and slows the animation |
+| `photo_flash` | The screen lights up white at full brightness while a photo is taken: brighter close-ups in a dim room, but shiny things show a reflection |
 | `camera_preview` | Show what the camera sees, with a green box around a detected face (for troubleshooting) |
 | `proximity`, `proximity_sensitivity` | Proximity sensor on/off; lower sensitivity numbers notice you from further away |
 | `radar`, `radar_distance_cm` | Use an LD2410 presence radar on Port C (see below); how close counts as at the desk |

@@ -34,6 +34,7 @@ face_tracking                = on     # eyes follow your face
 camera_mirrored              = off    # flip (on/off) if the eyes look away from you instead of at you
 face_gaze                    = 1.4    # how far the eyes turn toward you, 0-3
 face_model                   = fast   # fast checks ~14 times a second; accurate finds you more often per check but is ~7x slower
+photo_flash                  = off    # screen lights up white for photos (brighter close-ups; shiny things reflect)
 camera_preview               = off    # show what the camera sees (green box = face found) instead of the face
 
 # --- Proximity sensor (above the screen) ---

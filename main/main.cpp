@@ -323,6 +323,8 @@ static void loadSettings() {
                 for (size_t p = 0; (p = extra.find(" = ", p)) != std::string::npos; ++p) ++added;
                 ESP_LOGI(TAG, "added %d new setting%s to the end of settings.txt", added, added == 1 ? "" : "s");
                 text += extra;
+            } else if (!extra.empty()) {
+                ESP_LOGW(TAG, "couldn't add the new settings to settings.txt (card full or read-only?)");
             }
             std::vector<std::string> warnings;
             parseConfig(text, config, warnings);
@@ -447,13 +449,24 @@ static bool runPhoto(uint32_t now) {
         canvas.pushSprite(0, 0);
         if (t < liveMs) return true;
 
-        // Click.
+        // Click. With photo_flash, the screen lights the scene at full
+        // brightness while the photo is exposed; otherwise the white screen
+        // afterwards is just the "click".
         uint8_t* jpeg = nullptr;
         size_t len = 0;
-        const bool ok = photoCapture(&jpeg, &len, photo.frame);
+        if (config.photoFlash) {
+            canvas.fillScreen(TFT_WHITE);
+            canvas.pushSprite(0, 0);
+            M5.Display.setBrightness(255);
+        }
+        const bool ok = photoCapture(&jpeg, &len, photo.frame, config.photoFlash);
         photoEnd();
-        canvas.fillScreen(TFT_WHITE);  // flash
-        canvas.pushSprite(0, 0);
+        if (config.photoFlash) {
+            M5.Display.setBrightness(percentTo255(buddy.wantsDim() ? config.dimBrightness : config.brightness));
+        } else {
+            canvas.fillScreen(TFT_WHITE);
+            canvas.pushSprite(0, 0);
+        }
         if (!buddy.isMuted()) soundPlay(Sfx::Boop);
         if (!ok) {
             photo.caption = "Oops, no photo";

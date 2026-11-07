@@ -48,5 +48,7 @@ bool photoBegin();
 bool photoPreview(uint16_t* dst);
 // Takes the photo: a JPEG (heap_caps_malloc'd in PSRAM; caller frees) and,
 // if `still` isn't null, a half-size copy for showing it.
-bool photoCapture(uint8_t** jpeg, size_t* len, uint16_t* still);
+// `fresh`: skip frames already taken and wait for the next (for a flash,
+// which has to be lit while the frame is exposed).
+bool photoCapture(uint8_t** jpeg, size_t* len, uint16_t* still, bool fresh = false);
 void photoEnd();
