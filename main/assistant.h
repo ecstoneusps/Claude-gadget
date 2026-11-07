@@ -25,6 +25,7 @@ struct AssistantConfig {
     std::vector<std::pair<VoiceCommand, std::string>> extraPhrases;  // say.* from settings.txt
     std::string visionUrl;    // Ollama, for "what do you see?" ("" = no vision)
     std::string visionModel;  // e.g. gemma3:4b
+    bool memory = true;       // "remember that ...": notes on the SD card, given to the AI
 };
 
 // What the UI should show, posted to the queue given to assistantStart().

@@ -20,6 +20,8 @@
 #include "Wav.h"
 #include "audio_io.h"
 #include "cpustats.h"
+#include "memory.h"
+#include "Memory.h"
 #include "sound.h"
 #include "voice.h"
 #include "wifi.h"
@@ -210,7 +212,17 @@ static void startSttRun() {
     if (!sendJson(m)) failTurn("couldn't send to Home Assistant");
 }
 
-static void startIntentRun(const std::string& text) {
+// The notes changed since the AI last saw them (it sees them at the start of
+// a conversation; after a change, again with the next question).
+static bool s_notesChanged = false;
+
+static void startIntentRun(const std::string& said) {
+    const bool newConversation = s_conversationId.empty() || (int32_t)(s_conversationUntil - nowMs()) <= 0;
+    std::string text = said;
+    if (s_cfg.memory && (newConversation || s_notesChanged)) {
+        text = memoryPromptBlock() + said;
+        s_notesChanged = false;
+    }
     s_runId = s_nextId++;
     cJSON* m = cJSON_CreateObject();
     cJSON_AddNumberToObject(m, "id", s_runId);
@@ -436,6 +448,40 @@ static bool speak(const std::string& text) {
 static std::string askVision(const std::string& question);
 static void deliverReply(const std::string& reply, bool micsWaiting);
 
+// Remembers or forgets a note and says so (in Buddy's voice, with a face).
+static void handleMemory(const MemoryCommand& mc) {
+    std::string removed, reply;
+    switch (mc.type) {
+        case MemoryCommand::Remember:
+            reply = memoryRemember(mc.fact) == MemoryResult::Added
+                        ? "[happy] Got it! I'll remember that " + toSecondPerson(mc.fact) + "."
+                        : "[winking] I already knew that, " + toSecondPerson(mc.fact) + "!";
+            break;
+        case MemoryCommand::ForgetLast:
+            reply = memoryForgetLast(&removed) == MemoryResult::Removed
+                        ? "[thinking] Okay, I forgot that " + toSecondPerson(removed) + "."
+                        : "[confused] There's nothing to forget yet!";
+            break;
+        case MemoryCommand::Forget:
+            switch (memoryForget(mc.fact, &removed)) {
+                case MemoryResult::Removed: reply = "[thinking] Okay, I forgot that " + toSecondPerson(removed) + "."; break;
+                case MemoryResult::Empty: reply = "[confused] I don't have anything written down yet!"; break;
+                default: reply = "[confused] Hmm, I don't remember anything like that."; break;
+            }
+            break;
+        case MemoryCommand::ForgetAll:
+            reply = memoryForgetAll() == MemoryResult::Cleared
+                        ? "[sad] Okay, my notes are wiped clean. I kept a backup on the SD card, just in case."
+                        : "[confused] My notes are already empty!";
+            break;
+        default:
+            break;
+    }
+    s_notesChanged = true;
+    ESP_LOGI(TAG, "-> notes: %u", (unsigned)memoryCount());
+    deliverReply(reply, true);
+}
+
 // You said something: run it as a built-in command, or ask the AI.
 static void handleHeard(const std::string& text) {
     ESP_LOGI(TAG, "heard: \"%s\"", text.c_str());
@@ -454,6 +500,14 @@ static void handleHeard(const std::string& text) {
         if (assistantBeginTurn(false)) voiceFollowUp();
         else voiceResume();
         return;
+    }
+    // "Remember that ...", "forget that": notes on the SD card.
+    if (s_cfg.memory) {
+        const MemoryCommand mc = parseMemoryCommand(text);
+        if (mc.type != MemoryCommand::None) {
+            handleMemory(mc);
+            return;
+        }
     }
     // Asking about what it sees: a fresh photo (the main loop takes it and
     // calls assistantLook). The microphones keep waiting meanwhile.
@@ -573,7 +627,7 @@ static std::string askVision(const std::string& question) {
         }
         cJSON_AddItemToArray(msgs, m);
     };
-    add("system", kVisionPrompt, false);
+    add("system", std::string(kVisionPrompt) + (s_cfg.memory ? "\n" + memoryPromptBlock() : std::string()), false);
     bool first = true;
     for (const auto& [role, text] : s_visionChat) {
         add(role.c_str(), text, first && role == "user");

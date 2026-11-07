@@ -54,6 +54,7 @@ struct BuddyConfig {
     std::string haPipeline = "Buddy";  // the voice assistant's name in Home Assistant
     bool conversation = true;        // off: only the built-in commands, even with Wi-Fi set up
     bool followUp = true;            // keep listening after an answer, without "Hey Buddy"
+    bool memory = true;              // "remember that ...": notes in memories.txt, given to the AI
 
     // "What do you see?": photos go straight to a vision model in Ollama
     std::string visionUrl;           // http://192.168.4.98:11434 ("" = no vision)

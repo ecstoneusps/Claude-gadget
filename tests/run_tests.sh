@@ -14,7 +14,7 @@ g++ -std=c++17 -Wall -Wextra -Werror -Icomponents/face -Icomponents/companion -I
 "$OUT.config" "$@"
 
 g++ -std=c++17 -Wall -Wextra -Werror -Icomponents/assist \
-    tests/assist_test.cpp components/assist/AssistText.cpp components/assist/Wav.cpp -o "$OUT.assist"
+    tests/assist_test.cpp components/assist/AssistText.cpp components/assist/Wav.cpp components/assist/Memory.cpp -o "$OUT.assist"
 "$OUT.assist"
 
 g++ -std=c++17 -Wall -Wextra -Werror -Icomponents/ld2410 -Icomponents/companion -Icomponents/face -Icomponents/sfx \

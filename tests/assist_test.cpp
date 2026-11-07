@@ -8,6 +8,7 @@
 #include <stdlib.h>
 
 #include "AssistText.h"
+#include "Memory.h"
 #include "Wav.h"
 
 static int failures = 0;
@@ -211,6 +212,72 @@ static void test_vision_requests() {
     CHECK(!isVisionRequest("Take a picture of me!"));
 }
 
+static void test_memory_commands() {
+    MemoryCommand c = parseMemoryCommand(" Remember that my dog's name is King.");
+    CHECK(c.type == MemoryCommand::Remember);
+    CHECK_EQ(c.fact, "my dog's name is King");
+    c = parseMemoryCommand("Hey buddy, please remember my birthday is March 3rd!");
+    CHECK(c.type == MemoryCommand::Remember);
+    CHECK_EQ(c.fact, "my birthday is March 3rd");
+    c = parseMemoryCommand("Don't forget that I like my coffee black.");
+    CHECK(c.type == MemoryCommand::Remember);
+    CHECK_EQ(c.fact, "I like my coffee black");
+    c = parseMemoryCommand("Make a note that the car is due for an oil change.");
+    CHECK(c.type == MemoryCommand::Remember);
+    CHECK(parseMemoryCommand("Do you remember my dog's name?").type == MemoryCommand::None);
+    CHECK(parseMemoryCommand("What do you remember about me?").type == MemoryCommand::None);
+    CHECK(parseMemoryCommand("Remember when we went to the beach").type == MemoryCommand::None);
+    CHECK(parseMemoryCommand("Remember to call mom").type == MemoryCommand::None);  // a reminder, not a fact
+    CHECK(parseMemoryCommand("Tell me a joke").type == MemoryCommand::None);
+    CHECK(parseMemoryCommand("Forget that.").type == MemoryCommand::ForgetLast);
+    CHECK(parseMemoryCommand("Never mind that").type == MemoryCommand::ForgetLast);
+    CHECK(parseMemoryCommand("Forget everything.").type == MemoryCommand::ForgetAll);
+    c = parseMemoryCommand("Forget that my dog's name is King.");
+    CHECK(c.type == MemoryCommand::Forget);
+    CHECK_EQ(c.fact, "my dog's name is King");
+}
+
+static void test_second_person() {
+    CHECK_EQ(toSecondPerson("my dog's name is King"), "your dog's name is King");
+    CHECK_EQ(toSecondPerson("I like my coffee black"), "you like your coffee black");
+    CHECK_EQ(toSecondPerson("I'm allergic to cats"), "you're allergic to cats");
+    CHECK_EQ(toSecondPerson("I am a night owl"), "you are a night owl");
+    CHECK_EQ(toSecondPerson("the car is mine"), "the car is yours");
+    CHECK_EQ(toSecondPerson("Sam called me at 5 am"), "Sam called you at 5 am");
+}
+
+static void test_memory_store() {
+    MemoryStore m;
+    m.load("# comment\n\nmy dog's name is King\nI like my coffee black\n");
+    CHECK(m.notes().size() == 2);
+    CHECK(!m.add("My dog's name is King."));  // already known
+    CHECK(m.add("my birthday is March 3rd"));
+    CHECK(m.add("my locker code is 1234"));
+    CHECK(m.add("my locker code is 5678"));  // numbers make it a different note
+    CHECK(m.remove("locker code 1234"));
+    CHECK(m.remove("locker code 5678"));
+    std::string gone;
+    CHECK(m.remove("my dog's name", &gone));
+    CHECK_EQ(gone, "my dog's name is King");
+    CHECK(!m.remove("the weather in Paris"));
+    CHECK(m.removeLast(&gone));
+    CHECK_EQ(gone, "my birthday is March 3rd");
+    CHECK(m.notes().size() == 1);
+    MemoryStore again;
+    again.load(m.toText());
+    CHECK(again.notes() == m.notes());
+    const std::string block = m.promptBlock();
+    CHECK(block.find("I like my coffee black") != std::string::npos);
+    CHECK(MemoryStore().promptBlock().empty());
+    // Only the newest notes that fit.
+    MemoryStore many;
+    for (int i = 0; i < 200; ++i) many.add("note number " + std::to_string(i) + " about something");
+    const std::string b = many.promptBlock(300);
+    CHECK(b.size() < 450);
+    CHECK(b.find("note number 199") != std::string::npos);
+    CHECK(b.find("note number 0 ") == std::string::npos);
+}
+
 int main() {
     test_split_leading_tag();
     test_split_no_tag();
@@ -227,6 +294,9 @@ int main() {
     test_wav_rejects_junk();
     test_speech_shaper();
     test_vision_requests();
+    test_memory_commands();
+    test_second_person();
+    test_memory_store();
     if (failures) {
         printf("assist tests: %d failure(s)\n", failures);
         return 1;

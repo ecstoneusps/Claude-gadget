@@ -38,6 +38,23 @@ Fill in `wifi_name`, `wifi_password`, `ha_url` and `ha_token` in `settings.txt`
 (see [Settings](#settings-microsd-card)). Keep the card private: the token works
 like a password for the Home Assistant user it belongs to.
 
+## Remembering things
+
+Tell him something to keep: **"Remember that my dog's name is King"**, "don't
+forget that I like my coffee black", "make a note that the car needs an oil
+change". He says it back ("Got it! I'll remember that your dog's name is
+King") and writes it as a line in **`memories.txt`** on the SD card. At the
+start of each conversation the AI is given those notes, so later "what's my
+dog's name?" gets "King!" (the vision model sees them too).
+
+- **"Forget that"** removes the last note; **"forget that my dog's name is
+  King"** removes that one; **"forget everything"** clears them all (the old
+  list is kept as `memories-backup.txt`).
+- `memories.txt` is plain text, one note per line: read, edit or delete notes
+  on your computer. Lines starting with `#` are ignored.
+- Only things you ask him to remember are saved. `memory = off` in
+  settings.txt turns it off.
+
 ## Taking pictures and seeing
 
 The camera stays off until you ask for it (with `face_tracking = off`, the
@@ -304,6 +321,7 @@ and restart the buddy.
 | `conversation` | `off` uses only the built-in commands, even with the above filled in |
 | `follow_up` | `off` makes it go back to waiting for "Hey Buddy" after each answer |
 | `vision_url`, `vision_model` | Ollama's address and a vision model, for "what do you see?" |
+| `memory` | `off` stops "remember that ..." notes (kept in `memories.txt`) |
 
 When an update adds new settings, they're added to the end of your
 `settings.txt` (at their default values, with their explanations) the next

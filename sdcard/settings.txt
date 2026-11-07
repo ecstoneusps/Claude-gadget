@@ -59,6 +59,7 @@ ha_token                     =        # long-lived access token (from the Desk B
 ha_pipeline                  = Buddy  # name of the voice assistant in Home Assistant
 conversation                 = on     # off = only the built-in commands
 follow_up                    = on     # keep listening after an answer, no "Hey Buddy" needed
+memory                       = on     # "remember that ..." notes, kept in memories.txt and told to the AI
 
 # --- Seeing ("what do you see?", "what am I holding?") ---
 # Photos go straight to a vision model in Ollama on your PC; the answer is

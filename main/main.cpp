@@ -39,6 +39,7 @@
 #include "camera.h"
 #include "cpustats.h"
 #include "i2c_bus.h"
+#include "memory.h"
 #include "proximity.h"
 #include "radar.h"
 #include "sdcard.h"
@@ -309,6 +310,7 @@ static void voiceInitTask(void*) {
         ac.extraPhrases = config.extraPhrases;
         ac.visionUrl = config.visionUrl;
         ac.visionModel = config.visionModel;
+        ac.memory = config.memory;
         aiStarted.store(assistantStart(ac, assistEvents));
     }
     vTaskDelete(nullptr);
@@ -341,6 +343,7 @@ static void loadSettings() {
             ESP_LOGW(TAG, "could not read or create settings.txt");
         }
     }
+    if (config.memory) memoryLoad();
     buddy.sleepAfterMs = config.sleepAfterSeconds * 1000u;
     buddy.dimAfterMs = config.dimAfterSeconds * 1000u;
     buddy.sleepAfterLeftMs = config.sleepAfterLeavingSeconds * 1000u;
@@ -598,6 +601,7 @@ static void uiTask(void*) {
             settingsSetBool("muted", savedMuted);
         }
         handleVolumeChange(now);
+        memoryService();  // save notes to the SD card if they changed
         switch (buddy.takeCameraRequest()) {  // "take a picture" / offline "what is this"
             case Companion::CameraRequest::Photo: startPhoto(false, "", false, now); break;
             case Companion::CameraRequest::Look: startPhoto(true, "What do you see?", false, now); break;

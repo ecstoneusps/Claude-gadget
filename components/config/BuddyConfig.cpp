@@ -215,6 +215,8 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
         } else if (key == "vision_model") {
             if (val.empty() || val.find(' ') != std::string::npos) bad("must be a model name like gemma3:4b");
             else cfg.visionModel = val;
+        } else if (key == "memory") {
+            if (!parseBool(val, cfg.memory)) bad("must be on or off");
         } else if (key == "follow_up") {
             if (!parseBool(val, cfg.followUp)) bad("must be on or off");
         } else if (key.rfind("say.", 0) == 0) {
@@ -273,6 +275,7 @@ void addAiSection(std::string& t) {
     str("ha_pipeline", d.haPipeline, "name of the voice assistant in Home Assistant");
     onoff("conversation", d.conversation, "off = only the built-in commands");
     onoff("follow_up", d.followUp, "keep listening after an answer, no \"Hey Buddy\" needed");
+    onoff("memory", d.memory, "\"remember that ...\" notes, kept in memories.txt and told to the AI");
     add("");
     add("# --- Seeing (\"what do you see?\", \"what am I holding?\") ---");
     add("# Photos go straight to a vision model in Ollama on your PC; the answer is");
