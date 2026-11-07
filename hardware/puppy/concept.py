@@ -65,12 +65,23 @@ head = head - pocket - dome_inside - screen
 
 # --- Floppy ears: flat leaves from the upper back of the head, hanging down --
 def ear(side):
-    leaf = blob([(0, 0, 0, 8), (side * 6, 0, -22, 11), (side * 8, 0, -40, 9.5)]).scale((1, 0.32, 1))
-    # tilt the bottom of the ear outward a little
-    leaf = leaf.rotate((0, -side * 12, 0))
-    return leaf.translate((side * (head_x - 4), 24, head_z1 - 16))
+    """A flat leaf hanging from the upper back of the head, and its pink
+    inner-ear inlay: a smaller leaf shape set 1.2 mm into the front face, so
+    the ear stays smooth and the slicer can give the inlay its own colour."""
+    shape = [(0, 0, 0, 8), (side * 6, 0, -22, 11), (side * 8, 0, -40, 9.5)]
+    leaf = blob(shape).scale((1, 0.32, 1))
+    # The front 1.2 mm of the ear: the ear minus itself pushed back.
+    front_layer = leaf - leaf.translate((0, 1.2, 0))
+    # A smaller leaf (inset ~3.5 mm from the edge), as a deep prism.
+    inner = blob([(x, y, z, r - 3.5) for x, y, z, r in shape]).scale((1, 3, 1))
+    inlay = front_layer ^ inner
+    place = lambda m: m.rotate((0, -side * 12, 0)).translate((side * (head_x - 4), 24, head_z1 - 16))
+    return place(leaf - inlay), place(inlay)
 
-ears = ear(-1) + ear(1)
+
+(ear_l, inner_l), (ear_r, inner_r) = ear(-1), ear(1)
+ears = ear_l + ear_r
+inner_ears = inner_l + inner_r
 
 # --- Neck: short hollow column (cables run inside) ------------------------------
 neck = Manifold.cylinder(14, 13, 15, SEG).translate((0, 18, HEAD_Z0 - 12))
@@ -91,7 +102,7 @@ for side in (-1, 1):
 # tail: a little curl at the back
 tail = blob([(0, 58, 22, 5), (0, 64, 32, 4.5), (0, 62, 40, 4)])
 
-puppy = head + ears + neck + body + chest + tail
+puppy = head + ears + inner_ears + neck + body + chest + tail
 for p in paws + hinds:
     puppy = puppy + p
 # flat bottom so it sits on the desk
@@ -115,6 +126,7 @@ def save(m, out):
     print(f"{out}: {hi[0]-lo[0]:.0f} x {hi[1]-lo[1]:.0f} x {hi[2]-lo[2]:.0f} mm, {len(tm.faces)} faces")
 
 
+pink = pads + inner_ears  # paw pads and inner ears: one colour
 out = sys.argv[1] if len(sys.argv) > 1 else "puppy_concept.stl"
-save(puppy - pads, out)
-save(pads, out.replace(".stl", "_pads.stl"))
+save(puppy - pink, out)
+save(pink, out.replace(".stl", "_pink.stl"))
