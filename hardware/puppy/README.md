@@ -16,7 +16,7 @@ shared under the same license.
 
 | File | Size (mm) | Notes |
 |---|---|---|
-| `buddy_head.stl` | 71 x 85 x 47 | Screen side down. Supports: build plate only (for the neck socket and side windows) |
+| `buddy_head.stl` | 71 x 47 x 85 | **Standing upright** on its bottom, as it sits on Buddy. The dome prints as a smooth top surface and the bottom edges are a 45-degree chamfer, so the outside needs no supports. The top of the screen window is a 50 mm bridge and the side windows 13.5 mm bridges: fine with normal bridging settings (add a support enforcer there if yours sag). The chamber's ceiling inside has a 45-degree roof and a ~25 mm bridge at the top, hidden inside. Tip: variable layer height smooths the top of the dome |
 | `buddy_back_cap.stl` | 70 x 76 x 6 | Flat side down, no supports |
 | `buddy_ear_left.stl` + `buddy_ear_left_pink.stl` | 34 x 55 x 4 | Flat side down, no supports. Load both as **one object with two parts**; pink part on the top |
 | `buddy_ear_right.stl` + `buddy_ear_right_pink.stl` | 34 x 55 x 4 | Same |
@@ -32,10 +32,11 @@ pink part its own filament slot on the ACE Pro.
 ## Inside
 
 ![cut-away](images/cutaway.png)
+![head cut-away](images/head_cutaway.png)
 
 - **Head:** the CoreS3 slides in from the back, screen first, against the front
-  lip. Above it, an 18 mm dome chamber gives Grove plugs in Ports B and C room
-  to bend; behind it an 8 mm gap carries cables down to the bottom opening,
+  lip. Above it, a chamber with a 45-degree roof (about 17 mm of room above
+  Ports B and C, 21 mm in the middle) gives Grove plugs room to bend; behind it an 8 mm gap carries cables down to the bottom opening,
   which leads into the neck. Side windows (both sides) for the power button,
   USB-C, Port A and the speaker, as on the original.
 - **Back cap:** a groove on its inside fits over a rim around the head's back

@@ -15,7 +15,7 @@ import sys
 
 import numpy as np
 import trimesh
-from manifold3d import Manifold
+from manifold3d import CrossSection, Manifold
 
 SEG = 64          # smoothness of round shapes
 CLEAR = 0.25      # clearance between parts that fit together
@@ -81,11 +81,18 @@ def above(z):
 # Head
 # =========================================================================================
 def head_spheres(shrink):
-    """Tight rounding around the screen, a soft dome on top; `shrink` offsets inward."""
+    """Tight rounding around the screen, a soft dome on top; `shrink` offsets inward.
+
+    The head prints standing on its bottom, so the bottom edges are a 45-degree
+    chamfer (small spheres on the bed, inset so the slope up to the rounded
+    corners is 45 degrees) instead of a rounding that would overhang the bed.
+    """
     lo, hi = 8.0, 24.0
+    foot = 0.6 * lo + 0.5   # bottom-edge inset that gives a 45-degree slope up to the lo spheres
     pts = []
     for sx in (-1, 1):
         for y, sy in ((head_y0, 1), (head_y1, -1)):
+            pts.append((sx * (head_x - foot), y + sy * foot, HEAD_Z0 + 0.5, 0.5 - shrink))
             pts.append((sx * (head_x - lo), y + sy * lo, HEAD_Z0 + lo, lo - shrink))
             pts.append((sx * (head_x - lo), y + sy * lo, P0 + CORE, lo - shrink))
             pts.append((sx * (head_x - hi), y + sy * hi, head_z1 - hi, hi - shrink))
@@ -95,10 +102,29 @@ def head_spheres(shrink):
 head_outer = blob(head_spheres(0))
 
 
+ROOF_WALL = 6.0   # straight walls above the CoreS3 before the chamber roof slopes in
+
+
+def roof(erode=0.0):
+    """The chamber's ceiling: 45-degree slopes from the left, right and front
+    walls (the back is open to the cap), so the head prints upright with no
+    supports inside. Leaves ~11 mm above Ports B and C, ~23 mm at the middle."""
+    z0 = P0 + CORE + ROOF_WALL
+    half = CORE / 2 - erode + 0.6   # a little wider than the pocket, so no faces just touch
+    depth = SPLIT_Y + 40
+    # Across (x-z): a gable, extruded front to back.
+    gable = CrossSection([[(-half, P0 - 10), (half, P0 - 10), (half, z0), (0, z0 + half), (-half, z0)]])
+    sides = Manifold.extrude(gable, depth).rotate((90, 0, 0)).translate((0, depth - 10, 0))
+    # Front to back (y-z): rising at 45 degrees from the front wall.
+    slope = CrossSection([[(erode - 0.6, P0 - 10), (depth, P0 - 10), (depth, z0 + depth + 0.6), (erode - 0.6, z0)]])
+    front = Manifold.extrude(slope, 200).rotate((90, 0, 90)).translate((-100, 0, 0))
+    return sides ^ front
+
+
 def head_cavity(erode=0.0):
-    """Pocket for the CoreS3 (open to the back) plus the dome chamber above it."""
+    """Pocket for the CoreS3 (open to the back) plus the chamber above it."""
     pocket = rbox(-CORE / 2 + erode, CORE / 2 - erode, 0 + erode, SPLIT_Y + 20, P0 + erode, P0 + CORE - erode, 3)
-    dome = blob(head_spheres(SHELL + erode)) ^ above(P0 + CORE - 1)
+    dome = blob(head_spheres(SHELL + erode)) ^ above(P0 + CORE - 1) ^ roof(erode)
     return pocket + dome
 
 
@@ -248,7 +274,7 @@ if __name__ == "__main__":
     ear_l, ear_l_pink = ear(-1)
     ear_r, ear_r_pink = ear(1)
     save({
-        "buddy_head": (head, "front_down", "head"),
+        "buddy_head": (head, "as_is", "head"),
         "buddy_back_cap": (back_cap, "joint_down", "cap"),
         "buddy_ear_left": (ear_l, "flat_back", "ear_l"),
         "buddy_ear_left_pink": (ear_l_pink, "flat_back", "ear_l"),
