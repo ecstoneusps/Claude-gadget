@@ -216,11 +216,12 @@ crush_ribs = crush_band ^ crush_spots   # rooted in the groove's outer wall
 # posts in the cap into the two brass nuts in the DIN base's back panel, which
 # also clamps the CoreS3 against the front lip. The posts stop RIB_PLAY short of
 # the panel like the ribs, so the cap always seats on the head first.
-SCREW_X = 11.5                  # the nuts are this far left and right of centre (23 mm apart)
+SCREW_X = 11.75                 # the nuts are this far left and right of centre (measured 23-24 mm apart)
+SLOT = 0.6                      # the holes are slots, +/- this much across, to forgive that measurement
 SCREW_Z = P0 + CORE / 2         # and at the panel's mid-height
 SCREW_L = 16.0                  # M3 x 16 socket-head screws
 SCREW_BITE = 4.0                # how far the screw goes into the brass nut
-POST_R = 4.5
+POST_R = 5.0
 posts, screw_holes = Manifold(), Manifold()
 head_at = PANEL_D - SCREW_BITE + SCREW_L      # where the screw head sits (y)
 for sx in (-1, 1):
@@ -228,11 +229,12 @@ for sx in (-1, 1):
     along_y = lambda m: m.rotate((-90, 0, 0)).translate((x, 0, SCREW_Z))
     posts += along_y(Manifold.cylinder(SPLIT_Y + 2 - PANEL_D - RIB_PLAY, POST_R, POST_R, SEG)
                      .translate((0, 0, PANEL_D + RIB_PLAY)))
-    screw_holes += along_y(Manifold.cylinder(60, 1.75, 1.75, SEG).translate((0, 0, PANEL_D - 10)))   # 3.5 mm
+    slot = lambda m: Manifold.batch_hull([along_y(m).translate((dx, 0, 0)) for dx in (-SLOT, SLOT)])
+    screw_holes += slot(Manifold.cylinder(60, 1.75, 1.75, SEG).translate((0, 0, PANEL_D - 10)))   # 3.5 mm
     # Counterbore for the head (5.5 mm, so 6.4 mm wide), opening at the back of
     # the cap; it narrows at 45 degrees so it prints without a bridge.
-    screw_holes += along_y(Manifold.cylinder(30, 3.2, 3.2, SEG).translate((0, 0, head_at)))
-    screw_holes += along_y(Manifold.cylinder(1.45, 1.75, 3.2, SEG).translate((0, 0, head_at - 1.45)))
+    screw_holes += slot(Manifold.cylinder(30, 3.2, 3.2, SEG).translate((0, 0, head_at)))
+    screw_holes += slot(Manifold.cylinder(1.45, 1.75, 3.2, SEG).translate((0, 0, head_at - 1.45)))
 back_cap = ((head_outer ^ behind_split) - groove) + ribs + crush_ribs + posts - screw_holes
 
 
