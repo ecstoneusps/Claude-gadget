@@ -188,14 +188,13 @@ groove = ((blob(head_spheres(1.2 - RIM_CLEAR)) ^ slab(SPLIT_Y - 1, SPLIT_Y + LIP
 # Two ribs reach forward from the cap and press the CoreS3 against the front lip
 # (it slid back and forth on the test print). They're at the left and right
 # edges, clear of the cables down the middle and of Ports B/C at the top.
-# Where they touch, the DIN base's back panel is recessed RECESS mm below the
-# raised edges (measured: 28 mm there vs 30.5 mm at the edges).
-DEVICE_D = 33.5                 # measured depth of the CoreS3 + DIN base (to its raised edges)
-RECESS = 2.5                    # how much deeper the back panel sits where the ribs touch
+# PANEL_D is the depth from the screen to the DIN base's flat back panel,
+# where they touch (measured 28 mm; the raised edges stick out further).
+PANEL_D = 28.0
 RIB_PLAY = 0.2                  # how far the ribs stop short of the device
 ribs = Manifold()
 for sx in (-1, 1):
-    ribs += rbox(min(sx * 20.5, sx * 25.5), max(sx * 20.5, sx * 25.5), DEVICE_D - RECESS + RIB_PLAY, SPLIT_Y + 2,
+    ribs += rbox(min(sx * 20.5, sx * 25.5), max(sx * 20.5, sx * 25.5), PANEL_D + RIB_PLAY, SPLIT_Y + 2,
                  P0 + 14, P0 + 44, 1.2)
 
 # Crush ribs: small ridges on the outer wall of the groove that squeeze the
@@ -213,7 +212,28 @@ for sx in (-1, 1):
         crush_spots += box(sx * 20 if sx > 0 else -60, 60 if sx > 0 else sx * 20, y_a, y_b, z - CRUSH_W / 2, z + CRUSH_W / 2)
     crush_spots += box(sx * 14 - CRUSH_W / 2, sx * 14 + CRUSH_W / 2, y_a, y_b, -500, P0 - 2)   # bottom
 crush_ribs = crush_band ^ crush_spots   # rooted in the groove's outer wall
-back_cap = ((head_outer ^ behind_split) - groove) + ribs + crush_ribs
+# Two screws hold the cap on (the friction fit alone didn't): M3 screws through
+# posts in the cap into the two brass nuts in the DIN base's back panel, which
+# also clamps the CoreS3 against the front lip. The posts stop RIB_PLAY short of
+# the panel like the ribs, so the cap always seats on the head first.
+SCREW_X = 11.5                  # the nuts are this far left and right of centre (23 mm apart)
+SCREW_Z = P0 + CORE / 2         # and at the panel's mid-height
+SCREW_L = 16.0                  # M3 x 16 socket-head screws
+SCREW_BITE = 4.0                # how far the screw goes into the brass nut
+POST_R = 4.5
+posts, screw_holes = Manifold(), Manifold()
+head_at = PANEL_D - SCREW_BITE + SCREW_L      # where the screw head sits (y)
+for sx in (-1, 1):
+    x = sx * SCREW_X
+    along_y = lambda m: m.rotate((-90, 0, 0)).translate((x, 0, SCREW_Z))
+    posts += along_y(Manifold.cylinder(SPLIT_Y + 2 - PANEL_D - RIB_PLAY, POST_R, POST_R, SEG)
+                     .translate((0, 0, PANEL_D + RIB_PLAY)))
+    screw_holes += along_y(Manifold.cylinder(60, 1.75, 1.75, SEG).translate((0, 0, PANEL_D - 10)))   # 3.5 mm
+    # Counterbore for the head (5.5 mm, so 6.4 mm wide), opening at the back of
+    # the cap; it narrows at 45 degrees so it prints without a bridge.
+    screw_holes += along_y(Manifold.cylinder(30, 3.2, 3.2, SEG).translate((0, 0, head_at)))
+    screw_holes += along_y(Manifold.cylinder(1.45, 1.75, 3.2, SEG).translate((0, 0, head_at - 1.45)))
+back_cap = ((head_outer ^ behind_split) - groove) + ribs + crush_ribs + posts - screw_holes
 
 
 # =========================================================================================
