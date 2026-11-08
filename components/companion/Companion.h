@@ -114,6 +114,10 @@ public:
         return s;
     }
     void setMuted(bool m) { muted_ = m; }
+    // The loudness (0..1) of the sound effect playing right now, from the
+    // player. Once set, the mouth follows it instead of the built-in sound
+    // designs, so sounds replaced from the SD card move the mouth correctly.
+    void setSoundLevel(float level) { soundLevel_ = level; }
     // "take a picture" / "what do you see": what the main loop should do with
     // the camera (once).
     enum class CameraRequest { None, Photo, Look };
@@ -181,6 +185,7 @@ private:
 
     bool muted_ = false;
     int volumeChange_ = 0;
+    float soundLevel_ = -1;  // < 0: not provided, use the sound designs
     CameraRequest cameraRequest_ = CameraRequest::None;
     Sfx pending_ = Sfx::None;
     Sfx playing_ = Sfx::None;   // for lip-sync

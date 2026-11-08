@@ -99,3 +99,19 @@ std::string sdcardSavePhoto(const uint8_t* jpeg, size_t len) {
     }
     return name;
 }
+
+bool sdcardReadBinary(const char* path, std::vector<uint8_t>& out, size_t maxBytes) {
+    if (!s_card) return false;
+    FILE* f = fopen(fullPath(path).c_str(), "rb");
+    if (!f) return false;
+    fseek(f, 0, SEEK_END);
+    const long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    bool ok = size > 0 && (size_t)size <= maxBytes;
+    if (ok) {
+        out.resize(size);
+        ok = fread(out.data(), 1, size, f) == (size_t)size;
+    }
+    fclose(f);
+    return ok;
+}

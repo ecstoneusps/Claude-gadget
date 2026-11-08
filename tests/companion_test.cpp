@@ -1,5 +1,8 @@
 // Native unit tests for the companion "brain". Run: tests/run_tests.sh
 #include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <algorithm>
 #include <string.h>
 #include <ctype.h>
 
@@ -252,18 +255,46 @@ static void test_mouth_sings_along() {
 }
 
 static void test_sfx_render_matches_length() {
-    for (int i = 1; i < (int)Sfx::Count; ++i) {
-        Sfx s = (Sfx)i;
-        size_t n = sfxSamples(s);
-        CHECK(n > 0);
-        int16_t* buf = new int16_t[n + 16];
-        for (size_t k = 0; k < n + 16; ++k) buf[k] = 0x5A5A;
-        CHECK(sfxRender(s, buf) == n);
-        for (size_t k = n; k < n + 16; ++k) CHECK(buf[k] == 0x5A5A);  // no overrun
-        CHECK(buf[0] == 0);                                           // starts silent (fade-in)
-        CHECK(sfxLevelAt(s, sfxDurationMs(s) + 1) == 0.0f);
-        delete[] buf;
+    for (SfxStyle style : {SfxStyle::Robot, SfxStyle::Puppy}) {
+        sfxSetStyle(style);
+        for (int i = 1; i < (int)Sfx::Count; ++i) {
+            Sfx s = (Sfx)i;
+            size_t n = sfxSamples(s);
+            CHECK(n > 0);
+            int16_t* buf = new int16_t[n + 16];
+            for (size_t k = 0; k < n + 16; ++k) buf[k] = 0x5A5A;
+            CHECK(sfxRender(s, buf) == n);
+            for (size_t k = n; k < n + 16; ++k) CHECK(buf[k] == 0x5A5A);  // no overrun
+            CHECK(abs(buf[0]) < 400);                                     // starts (nearly) silent: fade-in
+            CHECK(sfxLevelAt(s, sfxDurationMs(s) + 1) == 0.0f);
+            // Audible, and never hitting the limits (clipping crackles).
+            double energy = 0;
+            int peak = 0;
+            for (size_t k = 0; k < n; ++k) {
+                energy += (double)buf[k] * buf[k];
+                peak = std::max(peak, abs((int)buf[k]));
+            }
+            const double rms = sqrt(energy / n);
+            if (rms < 1500 || peak > 32000)
+                printf("  %s %s: rms %.0f peak %d\n", style == SfxStyle::Puppy ? "puppy" : "robot", sfxName(s), rms, peak);
+            CHECK(rms > 1500);
+            CHECK(peak <= 32000);
+            delete[] buf;
+        }
     }
+    sfxSetStyle(SfxStyle::Puppy);
+}
+
+static void test_puppy_sounds_differ_from_robot() {
+    int different = 0;
+    for (int i = 1; i < (int)Sfx::Count; ++i) {
+        sfxSetStyle(SfxStyle::Robot);
+        const size_t robot = sfxSamples((Sfx)i);
+        sfxSetStyle(SfxStyle::Puppy);
+        const size_t puppy = sfxSamples((Sfx)i);
+        different += robot != puppy;
+    }
+    CHECK(different >= 10);  // (two could happen to be the same length)
 }
 
 // Feeds `ms` worth of 50 ms readings at `raw` (+/- a little noise).
@@ -671,6 +702,17 @@ static void test_dirty_canvas_matches_full_redraw() {
     CHECK(avg < 0.8);
 }
 
+static void test_mouth_follows_real_sound_level() {
+    Rig r;
+    r.c.setSoundLevel(0.0f);
+    r.c.onTap(r.now);   // a sound starts, but the player says it's silent
+    r.run(100);
+    CHECK(r.face.talkLevel() < 0.05f);
+    r.c.setSoundLevel(0.9f);
+    r.run(66);
+    CHECK(r.face.talkLevel() > 0.85f);
+}
+
 static void test_action_commands() {
     CHECK(isActionCommand(VoiceCommand::Wink));
     CHECK(isActionCommand(VoiceCommand::GoodNight));
@@ -698,6 +740,7 @@ int main() {
         {"yawns once when dozing off", test_yawns_once_when_dozing_off},
         {"mouth sings along", test_mouth_sings_along},
         {"sfx render matches length", test_sfx_render_matches_length},
+        {"puppy sounds differ from robot", test_puppy_sounds_differ_from_robot},
         {"presence arrive and leave", test_presence_arrive_and_leave},
         {"presence ignores blips and drift", test_presence_ignores_blips_and_drift},
         {"presence recovers from object left nearby", test_presence_recovers_from_object_left_nearby},
@@ -725,6 +768,7 @@ int main() {
         {"no clap reaction while replying", test_no_clap_reaction_while_replying},
         {"action commands", test_action_commands},
         {"volume commands", test_volume_commands},
+        {"mouth follows real sound level", test_mouth_follows_real_sound_level},
         {"camera commands", test_camera_commands},
         {"dirty canvas matches full redraw", test_dirty_canvas_matches_full_redraw},
         {"presence ignores zero readings at start", test_presence_ignores_zero_at_start},

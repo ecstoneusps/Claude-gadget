@@ -594,6 +594,7 @@ static void uiTask(void*) {
             buddy.setLowBattery(!onUsb && level > 0 && level < 10);
         }
 
+        buddy.setSoundLevel(soundEffectLevel());  // the mouth follows what's actually playing
         buddy.update(now);
         static bool savedMuted = buddy.isMuted();
         if (buddy.isMuted() != savedMuted) {  // "be quiet" / "sound on" was said
@@ -681,6 +682,7 @@ extern "C" void app_main(void) {
     const bool micOk = audioBegin();
     audioOk = micOk;
     cameraOkFlag = cameraOk;
+    sfxSetStyle(config.puppyVoice ? SfxStyle::Puppy : SfxStyle::Robot);
     soundInit();
     soundSetVolume(config.volume);
 

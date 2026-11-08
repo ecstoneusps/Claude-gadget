@@ -2,8 +2,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Procedurally synthesized "robot pet" sound effects. Portable C++: the device
-// renders them into RAM at boot, and the desktop tool writes them as WAV files.
+// Procedurally synthesized sound effects, in two voices: a "robot pet" (chirps,
+// boops, purrs) and a puppy (yips, barks, panting, whimpers, growls). Portable
+// C++: the device renders them into RAM at boot, and the desktop tool writes
+// them as WAV files.
 
 enum class Sfx : uint8_t {
     None,
@@ -23,6 +25,12 @@ enum class Sfx : uint8_t {
 };
 
 constexpr uint32_t kSfxSampleRate = 16000;  // matches the full-duplex I2S rate
+
+// Which voice the functions below use (default: Puppy). Set it before
+// rendering; it applies to sfxSamples, sfxRender, sfxDurationMs and sfxLevelAt.
+enum class SfxStyle : uint8_t { Robot, Puppy };
+void sfxSetStyle(SfxStyle style);
+SfxStyle sfxStyle();
 
 const char* sfxName(Sfx s);
 

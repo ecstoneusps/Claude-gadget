@@ -1,5 +1,5 @@
 // Writes every sound effect as a WAV file so you can listen on a PC.
-// Usage: sfx_wav <output-dir>
+// Usage: sfx_wav <output-dir> [robot|puppy]   (default: puppy)
 #include <stdio.h>
 #include <string>
 #include <vector>
@@ -14,6 +14,7 @@ int main(int argc, char** argv) {
         fprintf(stderr, "usage: %s <output-dir>\n", argv[0]);
         return 1;
     }
+    sfxSetStyle(argc > 2 && std::string(argv[2]) == "robot" ? SfxStyle::Robot : SfxStyle::Puppy);
     for (int i = 1; i < (int)Sfx::Count; ++i) {
         Sfx s = (Sfx)i;
         std::vector<int16_t> pcm(sfxSamples(s));

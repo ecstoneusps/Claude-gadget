@@ -137,18 +137,27 @@ The mapping is `kEmotionMap` in `components/face/Face.cpp`.
 ## Sound effects
 
 Every sound is synthesized in code (`components/sfx/Sfx.cpp`), so there are no
-audio files to manage, and the mouth moves along with each sound. Hear them on a
-PC in `preview/sounds/`:
+audio files to manage, and the mouth moves along with each sound. There are two
+voices, picked with `sound_style` in `settings.txt`:
 
-| Sound | When |
+- **puppy** (default): wufs, yips, arfs, panting, whines, a soft growl.
+  Hear them on a PC in `preview/sounds/`.
+- **robot**: the original chirps and boops, in `preview/sounds_robot/`.
+
+To use your own recording for any sound, put a WAV file named after it in a
+`sounds` folder on the card (for example `sounds/happy.wav`; any sample rate,
+mono or stereo, up to 2 MB). It replaces the built-in one at startup, and the
+mouth follows its loudness.
+
+| Sound (puppy) | When |
 |---|---|
-| chirp | Heard "Hey Buddy", or sound turned back on |
-| boop | Tapped; looking left or right |
-| happy | Greeted, praised, or told to be happy |
-| giggle | Asked for a joke |
-| love | "I love you", "thank you" |
-| purr | Being petted (repeats while you hold it) |
-| sad / angry / surprised | Scolded or told to show that feeling; a clap surprises it |
+| chirp (wuf) | Heard "Hey Buddy", or sound turned back on |
+| boop (yip) | Tapped; looking left or right |
+| happy (arf arf) | Greeted, praised, or told to be happy |
+| giggle (panting) | Asked for a joke |
+| love (happy whine) | "I love you", "thank you" |
+| purr (soft rumble) | Being petted (repeats while you hold it) |
+| sad (whimper) / angry (growl) / surprised (yip) | Scolded or told to show that feeling; a clap surprises it |
 | confused | Shaken, or didn't catch a command |
 | yawn | Dozing off or told good night |
 | wake | Startled awake |

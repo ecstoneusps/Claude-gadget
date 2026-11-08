@@ -24,3 +24,4 @@ size_t soundSpeechQueued();  // samples written but not yet played
 void soundStopSpeech();
 bool soundSpeaking();        // from begin until everything written has played
 float soundSpeechLevel();    // 0..1 loudness of what's playing now, for the mouth
+float soundEffectLevel();    // 0..1 loudness of the sound effect playing now (0 if none), for the mouth

@@ -12,6 +12,7 @@ struct BuddyConfig {
     int volume = 63;               // 0-100
     int brightness = 63;           // 0-100
     int dimBrightness = 8;         // 0-100
+    bool puppyVoice = true;        // sound_style: puppy (yips, barks) or robot (chirps, boops)
 
     // Sleepiness
     int sleepAfterSeconds = 60;

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build the previews: preview/face_sheet.png (every expression),
-preview/face_anim.gif (animation tour) and preview/sounds/*.wav (sound effects)."""
+preview/face_anim.gif (animation tour), preview/sounds/*.wav (puppy sound effects)
+and preview/sounds_robot/*.wav (the robot voice)."""
 import pathlib
 import subprocess
 import sys
@@ -51,7 +52,10 @@ def main():
         subprocess.run(["g++", "-std=c++17", "-O2", "-Wall", "-Wextra", "-I", str(ROOT / "components/sfx"),
                         str(ROOT / "tools/preview/sfx_wav.cpp"), str(ROOT / "components/sfx/Sfx.cpp"),
                         "-o", str(sfx_exe)], check=True)
-        subprocess.run([str(sfx_exe), str(sounds)], check=True)
+        subprocess.run([str(sfx_exe), str(sounds), "puppy"], check=True)
+        robot = out_dir / "sounds_robot"
+        robot.mkdir(exist_ok=True)
+        subprocess.run([str(sfx_exe), str(robot), "robot"], check=True)
     print("wrote", out_dir / "face_sheet.png", out_dir / "face_anim.gif", "and", sounds)
 
 

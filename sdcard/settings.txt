@@ -7,6 +7,7 @@
 
 # --- Sound and screen ---
 volume                       = 63     # speaker volume, 0-100 ("be quiet" still mutes it)
+sound_style                  = puppy  # puppy (yips, barks, panting) or robot (chirps, boops); sounds/<name>.wav on the card replaces one
 brightness                   = 63     # screen brightness, 0-100
 dim_brightness               = 8      # brightness while dozing, 0-100
 

@@ -2,6 +2,8 @@
 
 #include <atomic>
 #include <math.h>
+#include <string>
+#include <vector>
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -11,7 +13,9 @@
 #include "freertos/idf_additions.h"
 #include "freertos/stream_buffer.h"
 
+#include "Wav.h"
 #include "audio_io.h"
+#include "sdcard.h"
 
 static const char* TAG = "sound";
 
@@ -31,6 +35,7 @@ static std::atomic<bool> s_speechOpen{false};   // more pieces may still come
 static std::atomic<bool> s_speaking{false};
 static std::atomic<bool> s_stopSpeech{false};
 static std::atomic<float> s_speechLevel{0};
+static std::atomic<float> s_effectLevel{0};
 
 // Loudness of a chunk mapped to 0..1 mouth opening (-42 dBFS closed, -12 wide open).
 static float chunkLevel(const int16_t* p, int n) {
@@ -77,22 +82,48 @@ static void playerTask(void*) {
             size_t left = s_len[req];
             while (left > 0 && s_request.load() == (int)Sfx::None && !s_speechStart.load()) {
                 const int n = left < (size_t)kChunk ? (int)left : kChunk;
+                s_effectLevel.store(chunkLevel(pcm, n));
                 audioWrite(pcm, n);
                 pcm += n;
                 left -= n;
                 s_lastSoundUs.store(esp_timer_get_time());
             }
         }
+        s_effectLevel.store(0);
         playSpeech();  // a reply that arrived during an effect
         s_playing.store(false);
         s_lastSoundUs.store(esp_timer_get_time());
     }
 }
 
+// sounds/<name>.wav on the SD card (any rate, mono or stereo, 16-bit)
+// replaces a built-in sound.
+static bool loadFromCard(Sfx s) {
+    const std::string path = std::string("sounds/") + sfxName(s) + ".wav";
+    std::vector<uint8_t> file;
+    if (!sdcardReadBinary(path.c_str(), file, 2 * 1024 * 1024)) return false;
+    WavInfo info;
+    if (!parseWav(file.data(), file.size(), info)) {
+        ESP_LOGW(TAG, "%s isn't a 16-bit PCM WAV; using the built-in sound", path.c_str());
+        return false;
+    }
+    const size_t n = wavResampledLength(info, kAudioSampleRate);
+    int16_t* pcm = (int16_t*)heap_caps_malloc(n * sizeof(int16_t) + 2, MALLOC_CAP_SPIRAM);
+    if (!pcm) return false;
+    s_len[(int)s] = wavToMono(file.data(), info, kAudioSampleRate, pcm, n);
+    s_pcm[(int)s] = pcm;
+    ESP_LOGI(TAG, "using %s (%.1f s)", path.c_str(), s_len[(int)s] / (float)kAudioSampleRate);
+    return true;
+}
+
 void soundInit() {
     size_t total = 0;
     for (int i = 1; i < (int)Sfx::Count; ++i) {
         const Sfx s = (Sfx)i;
+        if (loadFromCard(s)) {
+            total += s_len[i] * sizeof(int16_t);
+            continue;
+        }
         s_len[i] = sfxSamples(s);
         s_pcm[i] = (int16_t*)heap_caps_malloc(s_len[i] * sizeof(int16_t), MALLOC_CAP_SPIRAM);
         if (!s_pcm[i]) {
@@ -106,7 +137,7 @@ void soundInit() {
     s_speechBuf = xStreamBufferCreateWithCaps(kAudioSampleRate * 2 * 8, 2, MALLOC_CAP_SPIRAM);  // 8 s
     // Core 1 next to the UI; it mostly waits on the I2S DMA.
     xTaskCreatePinnedToCore(playerTask, "sound", 3072, nullptr, 5, &s_player, 1);
-    ESP_LOGI(TAG, "rendered %d effects, %u KB", (int)Sfx::Count - 1, (unsigned)(total / 1024));
+    ESP_LOGI(TAG, "%s sounds ready, %u KB", sfxStyle() == SfxStyle::Puppy ? "puppy" : "robot", (unsigned)(total / 1024));
 }
 
 void soundSetVolume(int percent) { audioSetVolume(percent); }
@@ -157,3 +188,5 @@ void soundStopSpeech() {
 
 bool soundSpeaking() { return s_speaking.load(); }
 float soundSpeechLevel() { return s_speechLevel.load(); }
+
+float soundEffectLevel() { return s_effectLevel.load(); }

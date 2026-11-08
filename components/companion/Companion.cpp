@@ -511,7 +511,9 @@ void Companion::update(uint32_t now) {
     // Mouth: bounce while laughing, and "sing" along with sound effects.
     float talk = 0;
     if (before(now, laughUntil_)) talk = 0.45f + 0.45f * sinf(now * 0.03f);
-    if (playing_ != Sfx::None) {
+    if (soundLevel_ >= 0) {
+        talk = fmaxf(talk, soundLevel_);
+    } else if (playing_ != Sfx::None) {
         uint32_t t = now - soundStart_;
         if (t < sfxDurationMs(playing_)) talk = fmaxf(talk, sfxLevelAt(playing_, t));
         else playing_ = Sfx::None;
