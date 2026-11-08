@@ -239,7 +239,10 @@ for sx in (-1, 1):
     along_y = lambda m: m.rotate((-90, 0, 0)).translate((sx * FIX_X, 0, FIX_Z))
     fix_bosses += along_y(Manifold.cylinder(head_y1 - SPLIT_Y, 3.3, 3.3, SEG).translate((0, 0, SPLIT_Y)))
     fix_holes += along_y(Manifold.cylinder(20, DRILL_D / 2, DRILL_D / 2, SEG).translate((0, 0, SPLIT_Y - 1)))
-back_cap = (((head_outer ^ behind_split) + fix_bosses) - groove) + ribs + posts - screw_holes - fix_holes
+# The side ribs are left off: the screwed posts already hold the CoreS3, and
+# the ribs' ends landed on the DIN base's raised edges, holding the cap ~1 mm
+# off the head on the test print.
+back_cap = (((head_outer ^ behind_split) + fix_bosses) - groove) + posts - screw_holes - fix_holes
 
 
 # =========================================================================================

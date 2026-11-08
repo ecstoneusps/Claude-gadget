@@ -17,7 +17,7 @@ shared under the same license.
 | File | Size (mm) | Notes |
 |---|---|---|
 | `buddy_head.stl` | 71 x 47 x 85 | **Standing upright** on its bottom, as it sits on Buddy. The dome prints as a smooth top surface and the bottom edges are a 45-degree chamfer, so the outside needs no supports. The top of the screen window is a 50 mm bridge and the side windows 13.5 mm bridges: fine with normal bridging settings (add a support enforcer there if yours sag). The chamber's ceiling inside has a 45-degree roof and a ~25 mm bridge at the top, hidden inside. Tip: variable layer height smooths the top of the dome |
-| `buddy_back_cap.stl` | 70 x 77 x 20 | **Back side down**, ribs and groove facing up (the groove stays clear of first-layer squish). The back edges are a 45-degree chamfer: no supports |
+| `buddy_back_cap.stl` | 70 x 77 x 20 | **Back side down**, posts and groove facing up (the groove stays clear of first-layer squish). The back edges are a 45-degree chamfer: no supports |
 | `buddy_ear_left.stl` + `buddy_ear_left_pink.stl` | 34 x 55 x 4 | Flat side down, no supports. Load both as **one object with two parts**; pink part on the top |
 | `buddy_ear_right.stl` + `buddy_ear_right_pink.stl` | 34 x 55 x 4 | Same |
 | `buddy_body.stl` + `buddy_body_pink.stl` | 78 x 83 x 70 | Standing on its open bottom. Load both as **one object with two parts** (pink = paw pads). Supports: build plate only (chin, tail). The inside rises at 45 degrees, so nothing is needed inside |
@@ -44,7 +44,7 @@ pink part its own filament slot on the ACE Pro.
   rim). Four **M3 x 16 mm** screws:
   - two through the posts in the middle into the brass nuts in the DIN base's
     back panel, which clamp the CoreS3 against the front lip so it can't slide
-    back when you touch the screen (two ribs beside them keep it square);
+    back when you touch the screen;
   - two through the cap's sides into the head's side walls, which hold the cap
     on the head (the friction fit alone didn't). Their holes are drilled into
     the head once, through the cap (see Assembly).
