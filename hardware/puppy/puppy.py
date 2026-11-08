@@ -19,6 +19,7 @@ from manifold3d import CrossSection, Manifold
 
 SEG = 64          # smoothness of round shapes
 CLEAR = 0.25      # clearance between parts that fit together
+RIM_CLEAR = 0.35  # the head's rim in the back cap's groove (0.25 needed trimming on the test print)
 
 # --- The CoreS3 with its DIN base (measured: 54 x 54 x 33.5 mm) -------------------
 CORE = 54.8                 # pocket width/height (0.4 mm clearance per side)
@@ -96,6 +97,17 @@ def head_spheres(shrink):
             pts.append((sx * (head_x - lo), y + sy * lo, HEAD_Z0 + lo, lo - shrink))
             pts.append((sx * (head_x - lo), y + sy * lo, P0 + CORE, lo - shrink))
             pts.append((sx * (head_x - hi), y + sy * hi, head_z1 - hi, hi - shrink))
+        # The back cap prints back face down, so the back edges are a 45-degree
+        # chamfer too: small spheres on the back face, 0.414 r beyond each
+        # rounded corner's centre (where a 45-degree line meets the rounding).
+        yb = head_y1 - 0.5
+        for cx, cz, r, ux, uz in ((head_x - lo, HEAD_Z0 + lo, lo, 1, -1), (head_x - lo, P0 + CORE, lo, 1, 0),
+                                  (head_x - hi, head_z1 - hi, hi, 1, 1)):
+            reach = 0.414 * r
+            pts.append((sx * (cx + ux * reach), yb, cz, 0.5 - shrink))
+            if uz:
+                pts.append((sx * cx, yb, cz + uz * reach, 0.5 - shrink))
+                pts.append((sx * (cx + ux * reach * 0.707), yb, cz + uz * reach * 0.707, 0.5 - shrink))
     return pts
 
 
@@ -146,7 +158,17 @@ neck_socket = rrect_prism(0, NECK_CY, NECK_W + 2 * CLEAR, NECK_D + 2 * CLEAR, NE
 
 # Back cap joint: the head keeps a rim reaching LIP mm into the cap.
 behind_split = box(-500, 500, SPLIT_Y, 500, -500, 500)
-rim = (blob(head_spheres(1.2)) - cavity) ^ box(-500, 500, SPLIT_Y, SPLIT_Y + LIP, -500, 500)
+# The rim (on the head) and groove (in the cap) run around the CoreS3 pocket
+# only, a U on the left, bottom and right. Above that, in the dome, the
+# chamber narrows toward the back, so a rim there would be thin and step in
+# and out; the cap and head just meet face to face along the dome.
+slab = lambda y0, y1: box(-500, 500, y0, y1, -500, 500)
+RIM_TOP = P0 + CORE - 0.5
+below = lambda z: box(-500, 500, -500, 500, -500, z)
+rim = ((blob(head_spheres(1.2)) ^ slab(SPLIT_Y, SPLIT_Y + LIP - 1.0))
+       # lead-in: the last millimetre is 0.5 mm slimmer on the outside, so it finds the groove
+       + (blob(head_spheres(1.7)) ^ slab(SPLIT_Y + LIP - 1.0, SPLIT_Y + LIP))) - cavity
+rim = rim ^ below(RIM_TOP)
 
 # Ear tabs go through slots in the sides of the dome.
 EAR_Y, EAR_TOP = 24.0, head_z1 - 16
@@ -160,8 +182,19 @@ def ear_tab(side, grow=0.0):
 head = ((head_outer - behind_split) + rim) - cavity - screen_window - side_windows - bottom_windows - neck_socket
 head = head - ear_tab(-1, CLEAR) - ear_tab(1, CLEAR)
 
-groove = (blob(head_spheres(1.2 - CLEAR)) - head_cavity(CLEAR)) ^ box(-500, 500, SPLIT_Y - 1, SPLIT_Y + LIP + CLEAR, -500, 500)
-back_cap = (head_outer ^ behind_split) - groove
+groove = ((blob(head_spheres(1.2 - RIM_CLEAR)) ^ slab(SPLIT_Y - 1, SPLIT_Y + LIP + RIM_CLEAR))
+          - head_cavity(RIM_CLEAR)) ^ below(RIM_TOP + RIM_CLEAR)
+
+# Two ribs reach forward from the cap and press the CoreS3 against the front lip
+# (it slid back and forth on the test print). They're at the left and right
+# edges, clear of the cables down the middle and of Ports B/C at the top.
+DEVICE_D = 33.5                 # measured depth of the CoreS3 + DIN base
+RIB_PLAY = 0.2                  # how far the ribs stop short of the device
+ribs = Manifold()
+for sx in (-1, 1):
+    ribs += rbox(min(sx * 20.5, sx * 25.5), max(sx * 20.5, sx * 25.5), DEVICE_D + RIB_PLAY, SPLIT_Y + 2,
+                 P0 + 14, P0 + 44, 1.2)
+back_cap = ((head_outer ^ behind_split) - groove) + ribs
 
 
 # =========================================================================================
@@ -275,7 +308,7 @@ if __name__ == "__main__":
     ear_r, ear_r_pink = ear(1)
     save({
         "buddy_head": (head, "as_is", "head"),
-        "buddy_back_cap": (back_cap, "joint_down", "cap"),
+        "buddy_back_cap": (back_cap, "flat_back", "cap"),
         "buddy_ear_left": (ear_l, "flat_back", "ear_l"),
         "buddy_ear_left_pink": (ear_l_pink, "flat_back", "ear_l"),
         "buddy_ear_right": (ear_r, "flat_back", "ear_r"),
