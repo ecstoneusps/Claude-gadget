@@ -188,13 +188,32 @@ groove = ((blob(head_spheres(1.2 - RIM_CLEAR)) ^ slab(SPLIT_Y - 1, SPLIT_Y + LIP
 # Two ribs reach forward from the cap and press the CoreS3 against the front lip
 # (it slid back and forth on the test print). They're at the left and right
 # edges, clear of the cables down the middle and of Ports B/C at the top.
-DEVICE_D = 33.5                 # measured depth of the CoreS3 + DIN base
+# Where they touch, the DIN base's back panel is recessed RECESS mm below the
+# raised edges (measured: 28 mm there vs 30.5 mm at the edges).
+DEVICE_D = 33.5                 # measured depth of the CoreS3 + DIN base (to its raised edges)
+RECESS = 2.5                    # how much deeper the back panel sits where the ribs touch
 RIB_PLAY = 0.2                  # how far the ribs stop short of the device
 ribs = Manifold()
 for sx in (-1, 1):
-    ribs += rbox(min(sx * 20.5, sx * 25.5), max(sx * 20.5, sx * 25.5), DEVICE_D + RIB_PLAY, SPLIT_Y + 2,
+    ribs += rbox(min(sx * 20.5, sx * 25.5), max(sx * 20.5, sx * 25.5), DEVICE_D - RECESS + RIB_PLAY, SPLIT_Y + 2,
                  P0 + 14, P0 + 44, 1.2)
-back_cap = ((head_outer ^ behind_split) - groove) + ribs
+
+# Crush ribs: small ridges on the outer wall of the groove that squeeze the
+# head's rim, so the cap stays on when Buddy is tilted (with 0.35 mm of
+# clearance alone it fell off). They run front to back (upright as the cap
+# prints) and the PLA gives a little as the cap is pushed on. Too tight? Shave
+# them with a knife; too loose, raise CRUSH.
+CRUSH = 0.2                     # how far each ridge reaches past the rim's surface
+CRUSH_W = 1.6                   # ridge width
+crush_band = blob(head_spheres(1.2 - RIM_CLEAR - 0.3)) - blob(head_spheres(1.2 + CRUSH))
+crush_spots = Manifold()
+y_a, y_b = SPLIT_Y + 0.5, SPLIT_Y + LIP + RIM_CLEAR   # the first 0.5 mm stays open as a lead-in
+for sx in (-1, 1):
+    for z in (P0 + 12, P0 + 42):    # left and right sides
+        crush_spots += box(sx * 20 if sx > 0 else -60, 60 if sx > 0 else sx * 20, y_a, y_b, z - CRUSH_W / 2, z + CRUSH_W / 2)
+    crush_spots += box(sx * 14 - CRUSH_W / 2, sx * 14 + CRUSH_W / 2, y_a, y_b, -500, P0 - 2)   # bottom
+crush_ribs = crush_band ^ crush_spots   # rooted in the groove's outer wall
+back_cap = ((head_outer ^ behind_split) - groove) + ribs + crush_ribs
 
 
 # =========================================================================================
