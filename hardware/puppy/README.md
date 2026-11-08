@@ -41,12 +41,15 @@ pink part its own filament slot on the ACE Pro.
   USB-C, Port A and the speaker, as on the original.
 - **Back cap:** a U-shaped groove fits over a rim around the left, bottom and
   right of the head's back opening (0.35 mm clearance, with a lead-in on the
-  rim). Two **M3 x 16 mm** socket-head screws go through posts in the cap
-  into the two brass nuts in the DIN base's back panel: they hold the cap on
-  and clamp the CoreS3 against the front lip, so it can't slide back when you
-  touch the screen. Two ribs beside them (28 mm behind the screen, where the
-  panel is recessed) keep it square. Small crush ribs in the groove help the
-  fit. Unscrew the cap to take the CoreS3 out (for the SD card, for example).
+  rim). Four **M3 x 16 mm** screws:
+  - two through the posts in the middle into the brass nuts in the DIN base's
+    back panel, which clamp the CoreS3 against the front lip so it can't slide
+    back when you touch the screen (two ribs beside them keep it square);
+  - two through the cap's sides into the head's side walls, which hold the cap
+    on the head (the friction fit alone didn't). Their holes are drilled into
+    the head once, through the cap (see Assembly).
+
+  Remove all four to take the CoreS3 out (for the SD card, for example).
 
   ![retention](images/retention.png)
 - **Body:** hollow, open at the bottom. The neck on top is a hollow oval tube
@@ -67,8 +70,18 @@ pink part its own filament slot on the ACE Pro.
 5. From the back, plug the cable into Port C (blue), then slide the CoreS3 in,
    screen first, letting the cable fold up into the dome. The USB-C power
    cable goes in through the left side window.
-6. Press the back cap on and fasten it with two M3 x 16 mm screws into the
-   DIN base's brass nuts. Snug is enough; don't crank them.
+6. Screw the back cap to the CoreS3 with two M3 x 16 mm screws through the
+   middle posts into the DIN base's brass nuts. Snug is enough; don't crank them.
+7. **Once only, drill the head** for the two side screws. The first time, take
+   the CoreS3 out (so a drifting bit can't reach it), press the cap fully onto
+   the head and tape it there. Wrap tape on a 2.5 mm bit 17 mm from its tip.
+   Drill through the small hole near each side edge of the cap, halfway up, straight in,
+   keeping the bit parallel to the head's side, until the tape reaches the cap.
+   Blow out the chips.
+8. With everything in place, drive an M3 x 16 mm screw into each side hole.
+   It cuts its own thread in the cap and the head. Stop when it's snug, since
+   PLA threads strip if forced. After that, the screws go back in the same
+   threads.
 
 Note: the DIN base's DC jack and power switch face down into the neck, as on
 the original, so they can't be reached while assembled.
@@ -85,4 +98,6 @@ CoreS3 pocket (`CORE`, `CORE_D`), the fit clearances (`CLEAR` 0.25 mm,
 cap, `PANEL_D` (28 mm, screen to the recessed back panel), `RIB_PLAY`
 (0.2 mm), and the screw posts: `SCREW_X` (the brass nuts are 23-24 mm apart,
 11.75 mm each side of centre; the holes are slotted 0.6 mm either way), `SCREW_L` (16 mm screws) and `SCREW_BITE` (4 mm
-into the nut). `concept.py` is the earlier proportions model.
+into the nut).
+The side screws are at `FIX_X`/`FIX_Z` (30.5 mm out from centre, mid-height),
+where the head's side wall is thickest. `concept.py` is the earlier proportions model.

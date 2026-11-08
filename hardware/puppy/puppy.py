@@ -191,27 +191,12 @@ groove = ((blob(head_spheres(1.2 - RIM_CLEAR)) ^ slab(SPLIT_Y - 1, SPLIT_Y + LIP
 # PANEL_D is the depth from the screen to the DIN base's flat back panel,
 # where they touch (measured 28 mm; the raised edges stick out further).
 PANEL_D = 28.0
-RIB_PLAY = 0.2                  # how far the ribs stop short of the device
+RIB_PLAY = 0.5                  # how far the ribs stop short of the device (0.2 needed trimming)
 ribs = Manifold()
 for sx in (-1, 1):
     ribs += rbox(min(sx * 20.5, sx * 25.5), max(sx * 20.5, sx * 25.5), PANEL_D + RIB_PLAY, SPLIT_Y + 2,
                  P0 + 14, P0 + 44, 1.2)
 
-# Crush ribs: small ridges on the outer wall of the groove that squeeze the
-# head's rim, so the cap stays on when Buddy is tilted (with 0.35 mm of
-# clearance alone it fell off). They run front to back (upright as the cap
-# prints) and the PLA gives a little as the cap is pushed on. Too tight? Shave
-# them with a knife; too loose, raise CRUSH.
-CRUSH = 0.2                     # how far each ridge reaches past the rim's surface
-CRUSH_W = 1.6                   # ridge width
-crush_band = blob(head_spheres(1.2 - RIM_CLEAR - 0.3)) - blob(head_spheres(1.2 + CRUSH))
-crush_spots = Manifold()
-y_a, y_b = SPLIT_Y + 0.5, SPLIT_Y + LIP + RIM_CLEAR   # the first 0.5 mm stays open as a lead-in
-for sx in (-1, 1):
-    for z in (P0 + 12, P0 + 42):    # left and right sides
-        crush_spots += box(sx * 20 if sx > 0 else -60, 60 if sx > 0 else sx * 20, y_a, y_b, z - CRUSH_W / 2, z + CRUSH_W / 2)
-    crush_spots += box(sx * 14 - CRUSH_W / 2, sx * 14 + CRUSH_W / 2, y_a, y_b, -500, P0 - 2)   # bottom
-crush_ribs = crush_band ^ crush_spots   # rooted in the groove's outer wall
 # Two screws hold the cap on (the friction fit alone didn't): M3 screws through
 # posts in the cap into the two brass nuts in the DIN base's back panel, which
 # also clamps the CoreS3 against the front lip. The posts stop RIB_PLAY short of
@@ -235,7 +220,26 @@ for sx in (-1, 1):
     # the cap; it narrows at 45 degrees so it prints without a bridge.
     screw_holes += slot(Manifold.cylinder(30, 3.2, 3.2, SEG).translate((0, 0, head_at)))
     screw_holes += slot(Manifold.cylinder(1.45, 1.75, 3.2, SEG).translate((0, 0, head_at - 1.45)))
-back_cap = ((head_outer ^ behind_split) - groove) + ribs + crush_ribs + posts - screw_holes
+
+# ...but those screws only tie the cap to the CoreS3; nothing tied the cap to
+# the head, so a tap on the screen pushed both off the back (and no friction
+# fit held on the test prints). Two more M3 x 16 screws go straight through the
+# cap into the head's side walls beside the pocket, where the wall behind the
+# rim is 8 mm of solid PLA. The head isn't reprinted: you drill a 2.5 mm pilot
+# through the cap's hole into the head, then drive the screw in. It cuts its
+# own thread in the cap and the head, so it holds the cap on even though the
+# screw head doesn't need to pull tight. A small boss squares off the cap's
+# rounded back corner there so the screw head has a flat seat.
+FIX_X, FIX_Z = 30.5, P0 + CORE / 2    # hole centres: middle of the side wall, mid-height
+DRILL_D = 2.5                          # pilot for M3 in PLA (the cap's printed hole guides the bit)
+FIX_L = 16.0                           # M3 x 16
+DRILL_DEPTH = FIX_L + 1.0              # from the cap's back face
+fix_bosses, fix_holes = Manifold(), Manifold()
+for sx in (-1, 1):
+    along_y = lambda m: m.rotate((-90, 0, 0)).translate((sx * FIX_X, 0, FIX_Z))
+    fix_bosses += along_y(Manifold.cylinder(head_y1 - SPLIT_Y, 3.3, 3.3, SEG).translate((0, 0, SPLIT_Y)))
+    fix_holes += along_y(Manifold.cylinder(20, DRILL_D / 2, DRILL_D / 2, SEG).translate((0, 0, SPLIT_Y - 1)))
+back_cap = (((head_outer ^ behind_split) + fix_bosses) - groove) + ribs + posts - screw_holes - fix_holes
 
 
 # =========================================================================================
