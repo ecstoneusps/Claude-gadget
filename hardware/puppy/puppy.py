@@ -191,7 +191,7 @@ groove = ((blob(head_spheres(1.2 - RIM_CLEAR)) ^ slab(SPLIT_Y - 1, SPLIT_Y + LIP
 # PANEL_D is the depth from the screen to the DIN base's flat back panel,
 # where they touch (measured 28 mm; the raised edges stick out further).
 PANEL_D = 28.0
-RIB_PLAY = 0.5                  # how far the ribs stop short of the device (0.2 needed trimming)
+RIB_PLAY = 1.0                  # how far the posts stop short of the back panel (0.5 still strained the cap on the test print)
 ribs = Manifold()
 for sx in (-1, 1):
     ribs += rbox(min(sx * 20.5, sx * 25.5), max(sx * 20.5, sx * 25.5), PANEL_D + RIB_PLAY, SPLIT_Y + 2,

@@ -97,7 +97,7 @@ Sizes worth checking against your parts are near the top of the file: the
 CoreS3 pocket (`CORE`, `CORE_D`), the fit clearances (`CLEAR` 0.25 mm,
 `RIM_CLEAR` 0.35 mm), the radar board (`RADAR_W`, `RADAR_T`), and, by the back
 cap, `PANEL_D` (28 mm, screen to the recessed back panel), `RIB_PLAY`
-(0.2 mm), and the screw posts: `SCREW_X` (the brass nuts are 23-24 mm apart,
+(1.0 mm: how far the posts stop short of the panel), and the screw posts: `SCREW_X` (the brass nuts are 23-24 mm apart,
 11.75 mm each side of centre; the holes are slotted 0.6 mm either way), `SCREW_L` (16 mm screws) and `SCREW_BITE` (4 mm
 into the nut).
 The side screws are at `FIX_X`/`FIX_Z` (30.5 mm out from centre, mid-height),
