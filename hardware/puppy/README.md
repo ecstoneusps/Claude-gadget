@@ -75,12 +75,13 @@ pink part its own filament slot on the ACE Pro.
 7. **Once only, drill the head** for the two side screws. The first time, take
    the CoreS3 out (so a drifting bit can't reach it), press the cap fully onto
    the head and tape it there. Wrap tape on a 2.5 mm bit 17 mm from its tip.
-   Drill through the small hole near each side edge of the cap, halfway up, straight in,
-   keeping the bit parallel to the head's side, until the tape reaches the cap.
+   Drill through the hole near each side edge of the cap, halfway up: centre
+   the bit in the hole and go straight in, parallel to the head's side, until
+   the tape reaches the cap.
    Blow out the chips.
 8. With everything in place, drive an M3 x 16 mm screw into each side hole.
-   It cuts its own thread in the cap and the head. Stop when it's snug, since
-   PLA threads strip if forced. After that, the screws go back in the same
+   It passes through the cap and cuts its own thread in the head, pulling the
+   cap tight. Stop when it's snug, since PLA threads strip if forced. After that, the screws go back in the same
    threads.
 
 Note: the DIN base's DC jack and power switch face down into the neck, as on

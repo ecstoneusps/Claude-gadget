@@ -226,19 +226,21 @@ for sx in (-1, 1):
 # fit held on the test prints). Two more M3 x 16 screws go straight through the
 # cap into the head's side walls beside the pocket, where the wall behind the
 # rim is 8 mm of solid PLA. The head isn't reprinted: you drill a 2.5 mm pilot
-# through the cap's hole into the head, then drive the screw in. It cuts its
-# own thread in the cap and the head, so it holds the cap on even though the
-# screw head doesn't need to pull tight. A small boss squares off the cap's
+# into the head through the cap's 3.4 mm clearance hole, then drive the screw
+# in. It cuts its thread in the head only, so it pulls the cap tight. (A 2.5 mm
+# hole in the cap printed too small for the screw, and threads in the cap
+# would lock in any gap at the seam.) A small boss squares off the cap's
 # rounded back corner there so the screw head has a flat seat.
 FIX_X, FIX_Z = 30.5, P0 + CORE / 2    # hole centres: middle of the side wall, mid-height
-DRILL_D = 2.5                          # pilot for M3 in PLA (the cap's printed hole guides the bit)
+DRILL_D = 2.5                          # pilot for M3 in the head
+FIX_HOLE = 3.4                         # clearance in the cap
 FIX_L = 16.0                           # M3 x 16
 DRILL_DEPTH = FIX_L + 1.0              # from the cap's back face
 fix_bosses, fix_holes = Manifold(), Manifold()
 for sx in (-1, 1):
     along_y = lambda m: m.rotate((-90, 0, 0)).translate((sx * FIX_X, 0, FIX_Z))
     fix_bosses += along_y(Manifold.cylinder(head_y1 - SPLIT_Y, 3.3, 3.3, SEG).translate((0, 0, SPLIT_Y)))
-    fix_holes += along_y(Manifold.cylinder(20, DRILL_D / 2, DRILL_D / 2, SEG).translate((0, 0, SPLIT_Y - 1)))
+    fix_holes += along_y(Manifold.cylinder(20, FIX_HOLE / 2, FIX_HOLE / 2, SEG).translate((0, 0, SPLIT_Y - 1)))
 # The side ribs are left off: the screwed posts already hold the CoreS3, and
 # the ribs' ends landed on the DIN base's raised edges, holding the cap ~1 mm
 # off the head on the test print.
