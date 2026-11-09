@@ -149,6 +149,8 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
             if (v == "puppy") cfg.puppyVoice = true;
             else if (v == "robot") cfg.puppyVoice = false;
             else bad("must be puppy or robot");
+        } else if (key == "screen_flip") {
+            if (!parseBool(val, cfg.screenFlip)) bad("must be on or off");
         } else if (key == "brightness") {
             if (!parseInt(val, 0, 100, cfg.brightness)) bad("must be 0-100");
         } else if (key == "dim_brightness") {
@@ -412,6 +414,7 @@ std::string defaultConfigText() {
              "puppy (yips, barks, panting) or robot (chirps, boops); sounds/<name>.wav on the card replaces one");
     add(buf);
     num("brightness", d.brightness, "screen brightness, 0-100");
+    onoff("screen_flip", d.screenFlip, "on: CoreS3 turned around in the puppy head (camera at the top)");
     num("dim_brightness", d.dimBrightness, "brightness while dozing, 0-100");
     add("");
     add("# --- Sleepiness ---");

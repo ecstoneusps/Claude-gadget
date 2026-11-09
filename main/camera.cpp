@@ -61,6 +61,17 @@ static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static FaceSighting s_latest = {};
 static std::atomic<uint32_t> s_intervalMs{200};
 static bool s_cameraOk = false;            // started for face tracking / preview
+static bool s_flip = false;                // turn the picture 180 degrees (screen_flip)
+
+void cameraSetFlip(bool turned) { s_flip = turned; }
+
+// Turning the picture 180 degrees is mirroring it both ways. The driver reads
+// the sensor's current mirror/flip bits at start, so toggle them.
+static void applyFlip(sensor_t* s) {
+    if (!s_flip || !s) return;
+    if (s->set_hmirror) s->set_hmirror(s, !s->status.hmirror);
+    if (s->set_vflip) s->set_vflip(s, !s->status.vflip);
+}
 static std::atomic<bool> s_hold{false};    // face task: stop touching the camera (a photo is being taken)
 static std::atomic<bool> s_held{false};    // face task: ...and it has stopped
 static uint16_t* s_preview = nullptr;      // latest frame copy, only in preview mode
@@ -101,6 +112,7 @@ bool cameraBegin() {
         // Brightest auto-exposure target: indoors the default image is dark
         // (mean green ~8/63 measured), which made faces hard to find.
         if (s->set_ae_level) s->set_ae_level(s, 2);
+        applyFlip(s);
         ESP_LOGI(TAG, "camera ready (sensor PID 0x%02x)", s->id.PID);
     }
     s_cameraOk = true;
@@ -268,6 +280,7 @@ static void startCamera(framesize_t size, int fbCount) {
     }
     if (sensor_t* sen = esp_camera_sensor_get()) {
         if (sen->set_ae_level) sen->set_ae_level(sen, 2);
+        applyFlip(sen);
         if (size != FRAMESIZE_QQVGA && sen->set_reg) {
             // Slow the sensor's pixel clock (GC0308 register 0x28, bits 6:4 =
             // divider - 1; the driver uses 1 on the original ESP32). A photo

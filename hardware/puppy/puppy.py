@@ -25,11 +25,11 @@ RIM_CLEAR = 0.35  # the head's rim in the back cap's groove (0.25 needed trimmin
 CORE = 54.8                 # pocket width/height (0.4 mm clearance per side)
 CORE_D = 34.0               # pocket depth for the 33.5 mm device
 GAP_BEHIND = 5.0            # space behind the device for cables (the DIN base's back panel sits a further 2.5-5.5 mm in)
-CHAMBER = 11.0              # room above Ports B and C for a Grove plug (18 made a huge forehead)
+CHAMBER = 4.0               # a little room above the CoreS3 (turned around, nothing plugs in at the top)
 
 # --- Head ---------------------------------------------------------------------------------
-FRONT, BOTTOM, TOP, BACK = 2.4, 6.0, 6.0, 10.0   # thick back: room to sink the screw heads
-SIDE = 8.0                  # side walls (thick for the rounded look)
+FRONT, BOTTOM, TOP, BACK = 2.4, 8.5, 6.0, 10.0   # thick floor and back: room to sink the screw heads
+SIDE = 6.0                  # side walls
 SHELL = 3.0                 # dome wall
 HEAD_Z0 = 66.0              # underside of the head above the desk (just clear of the body)
 head_x = CORE / 2 + SIDE
@@ -81,41 +81,47 @@ def above(z):
 # =========================================================================================
 # Head
 # =========================================================================================
+TOP_R = 16.0      # rounding of the head's top corners, seen from the front
+
+
 def head_spheres(shrink):
-    """Tight rounding around the screen, a soft dome on top; `shrink` offsets inward.
+    """A rounded box around the CoreS3: edges rounded to 8 mm, the top corners
+    to TOP_R as seen from the front. `shrink` offsets inward.
 
     The head prints standing on its bottom, so the bottom edges are a 45-degree
     chamfer (small spheres on the bed, inset so the slope up to the rounded
     corners is 45 degrees) instead of a rounding that would overhang the bed.
     """
-    lo, hi = 8.0, 24.0
+    lo = 8.0
     foot = 0.6 * lo + 0.5   # bottom-edge inset that gives a 45-degree slope up to the lo spheres
+    # Outline seen from the front (x, z) of the edge spheres' centres, with the
+    # outward direction at each: the bottom corner, then the top corner's arc.
+    outline = [(head_x - lo, HEAD_Z0 + lo, 1.0, 0.0), (head_x - lo, HEAD_Z0 + lo, 0.707, -0.707),
+               (head_x - lo, HEAD_Z0 + lo, 0.0, -1.0)]
+    for deg in range(0, 91, 15):
+        a = np.radians(deg)
+        outline.append((head_x - TOP_R + (TOP_R - lo) * np.cos(a), head_z1 - TOP_R + (TOP_R - lo) * np.sin(a),
+                        np.cos(a), np.sin(a)))
     pts = []
     for sx in (-1, 1):
         for y, sy in ((head_y0, 1), (head_y1, -1)):
             pts.append((sx * (head_x - foot), y + sy * foot, HEAD_Z0 + 0.5, 0.5 - shrink))
-            pts.append((sx * (head_x - lo), y + sy * lo, HEAD_Z0 + lo, lo - shrink))
-            pts.append((sx * (head_x - lo), y + sy * lo, P0 + CORE, lo - shrink))
-            pts.append((sx * (head_x - hi), y + sy * hi, head_z1 - hi, hi - shrink))
+            for cx, cz, _, _ in outline:
+                pts.append((sx * cx, y + sy * lo, cz, lo - shrink))
         # The back cap prints back face down, so the back edges are a 45-degree
         # chamfer too: small spheres on the back face, 0.414 r beyond each
-        # rounded corner's centre (where a 45-degree line meets the rounding).
+        # rounded edge's centre (where a 45-degree line meets the rounding).
         yb = head_y1 - 0.5
-        for cx, cz, r, ux, uz in ((head_x - lo, HEAD_Z0 + lo, lo, 1, -1), (head_x - lo, P0 + CORE, lo, 1, 0),
-                                  (head_x - hi, head_z1 - hi, hi, 1, 1)):
-            reach = 0.414 * r
-            pts.append((sx * (cx + ux * reach), yb, cz, 0.5 - shrink))
-            if uz:
-                pts.append((sx * cx, yb, cz + uz * reach, 0.5 - shrink))
-                pts.append((sx * (cx + ux * reach * 0.707), yb, cz + uz * reach * 0.707, 0.5 - shrink))
+        for cx, cz, ux, uz in outline:
+            pts.append((sx * (cx + ux * 0.414 * lo), yb, cz + uz * 0.414 * lo, 0.5 - shrink))
     return pts
 
 
 head_outer = blob(head_spheres(0))
 
 
-ROOF_WALL = 2.0   # straight walls above the CoreS3 before the chamber roof slopes in
-ROOF_TOP = 10.5    # the chamber's flat top, this far above the CoreS3 (a short hidden bridge)
+ROOF_WALL = 1.0   # straight walls above the CoreS3 before the chamber roof slopes in
+ROOF_TOP = 6.0    # the chamber's flat top, this far above the CoreS3 (a short hidden bridge)
 ROOF_FRONT = 4.0  # the front slope starts this far behind the front wall
 
 
@@ -158,8 +164,8 @@ for sx in (-1, 1):
     side_windows += w.translate((sx * (CORE / 2 + 3), 0, 0))
 
 # Bottom: DC jack and power switch (as in the original), and the way into the neck.
-bottom_windows = (box(-16, 16, 11, 31, HEAD_Z0 - 1, P0 + 1)
-                  + rrect_prism(0, NECK_CY, NECK_W - 2 * NECK_WALL, NECK_D - 2 * NECK_WALL, 3, HEAD_Z0 - 1, P0 + 1))
+# (just the middle: the floor beside it, over the neck's side walls, holds the neck screws)
+bottom_windows = box(-14, 14, 11, 31, HEAD_Z0 - 1, P0 + 1)
 neck_socket = rrect_prism(0, NECK_CY, NECK_W + 2 * CLEAR, NECK_D + 2 * CLEAR, NECK_R + CLEAR, HEAD_Z0 - 1, HEAD_Z0 + SOCKET)
 
 # Back cap joint: the head keeps a rim reaching LIP mm into the cap.
@@ -177,11 +183,11 @@ rim = ((blob(head_spheres(1.2)) ^ slab(SPLIT_Y, SPLIT_Y + LIP - 1.0))
 rim = rim ^ below(RIM_TOP)
 
 # Ear tabs go through slots in the sides of the dome.
-EAR_Y, EAR_TOP = 24.0, P0 + CORE + 7.5   # tabs above the CoreS3 pocket, beside the chamber
+EAR_Y, EAR_TOP = 24.0, head_z1 - TOP_R + 1   # tabs in the straight side wall, just below the top corner
 
 
 def ear_tab(side, grow=0.0):
-    return box(min(side * (head_x - 6), side * (head_x + 2)) - grow, max(side * (head_x - 6), side * (head_x + 2)) + grow,
+    return box(min(side * (head_x - 4), side * (head_x + 2)) - grow, max(side * (head_x - 4), side * (head_x + 2)) + grow,
                EAR_Y - 2.0 - grow, EAR_Y + 0.95 + grow, EAR_TOP - 7 - grow, EAR_TOP + 2 + grow)
 
 
@@ -198,8 +204,8 @@ RIB_PLAY = 1.0                  # how far the posts stop short of the back panel
 
 # Every joint is held by M3 screws whose heads sit flush or below the surface:
 #   cap -> CoreS3: 2 x M3 x 16 socket head, through posts into the DIN base's brass nuts
-#   cap -> head:   2 x M3 x 16 socket head, into the head's side walls (printed pilot holes)
-#   head -> neck:  2 x M3 x 10 countersunk, down through the pocket floor into the neck
+#   cap -> head:   2 x M3 x 16 socket head, into the head's floor at the bottom corners (printed pilot holes)
+#   head -> neck:  2 x M3 x 12 socket head, up from under the body through the neck into the head's floor
 
 # Cap -> CoreS3: the screws clamp the CoreS3 against the front lip so a tap on
 # the screen can't push it back.
@@ -224,13 +230,14 @@ for sx in (-1, 1):
     screw_holes += slot(Manifold.cylinder(1.45, 1.75, 3.2, SEG).translate((0, 0, head_at - 1.45)))
 
 # Cap -> head: those screws only tie the cap to the CoreS3, so two more go
-# through the cap into the head's side walls beside the pocket (8 mm of solid
-# PLA behind the rim). The head has printed 2.5 mm pilot holes, the cap 3.4 mm
-# clearance holes, so the screws pull the cap tight. The heads sit in
-# counterbores just above the groove, below the cap's back surface.
-FIX_X, FIX_Z = 30.0, P0 + CORE / 2    # middle of the side wall, mid-height
+# through the cap's bottom corners into the head's floor, in the 5 mm of solid
+# PLA between the neck socket and the CoreS3 (the 6 mm side walls are too thin
+# for them). The head has printed 2.5 mm pilot holes, the cap 3.4 mm clearance
+# holes, so the screws pull the cap tight. The heads sit in counterbores just
+# above the groove, below the cap's back surface.
+FIX_X, FIX_Z = 24.5, P0 - 3.0         # beside the neck socket, mid-floor
 FIX_L = 16.0                           # M3 x 16
-FIX_SEAT = SPLIT_Y + LIP + RIM_CLEAR + 1.6    # the screw head sits here (its 45-degree step clears the groove)
+FIX_SEAT = SPLIT_Y + LIP + RIM_CLEAR + 1.2    # the screw head sits here, flush with the back
 fix_holes, fix_pilots = Manifold(), Manifold()
 for sx in (-1, 1):
     along_y = lambda m: m.rotate((-90, 0, 0)).translate((sx * FIX_X, 0, FIX_Z))
@@ -240,19 +247,28 @@ for sx in (-1, 1):
     fix_pilots += along_y(Manifold.cylinder(FIX_L + 1, 1.25, 1.25, SEG).translate((0, 0, FIX_SEAT - FIX_L - 1)))
 back_cap = ((head_outer ^ behind_split) - groove) + posts - screw_holes - fix_holes
 
-# Head -> neck: countersunk screws down through the pocket floor (under the
-# CoreS3, so their heads must be flush) into bosses inside the neck. Put them in
-# with a hex key through the back opening before the CoreS3 goes in.
-NECK_SCREW_X = 19.5                    # over the neck's side walls (the pilot stays 1.25 mm inside them)
-NECK_SCREW_L = 10.0                    # M3 x 10 countersunk (DIN 7991)
+# Head -> neck: socket-head screws driven UP from underneath the body (a long
+# 2.5 mm hex key through the open bottom), through bosses inside the neck,
+# into blind pilot holes in the head's floor. That way the head goes on last:
+# the CoreS3, with the radar cable plugged into its downward-facing Port C,
+# is already in it. The pocket floor has no holes.
+NECK_SCREW_X = 17.5                    # inside the neck wall, so the key tunnel stays 1.2 mm inside its outside
+NECK_SCREW_L = 12.0                    # M3 x 12 socket head
+NECK_BITE = P0 - 1.2 - (HEAD_Z0 + SOCKET)     # pilot depth in the head's floor (1.2 mm of floor left above)
+NECK_SEAT = HEAD_Z0 + SOCKET + NECK_BITE - NECK_SCREW_L   # the screw head bears on this (facing down, in the boss)
 neck_screw_holes, neck_pilots = Manifold(), Manifold()
 for sx in (-1, 1):
     at = lambda m: m.translate((sx * NECK_SCREW_X, NECK_CY, 0))
-    neck_screw_holes += at(Manifold.cylinder(20, 1.7, 1.7, SEG).translate((0, 0, HEAD_Z0 - 5)))
-    neck_screw_holes += at(Manifold.cylinder(1.6, 1.6, 3.2, SEG).translate((0, 0, P0 - 1.6)))   # 90-degree countersink
-    neck_screw_holes += at(Manifold.cylinder(5, 3.2, 3.2, SEG).translate((0, 0, P0 - 0.01)))
-    neck_pilots += at(Manifold.cylinder(NECK_SCREW_L + 1, 1.25, 1.25, SEG).translate((0, 0, P0 - NECK_SCREW_L - 1)))
+    neck_screw_holes += at(Manifold.cylinder(NECK_BITE + SOCKET + 1, 1.25, 1.25, SEG).translate((0, 0, HEAD_Z0 - 1)))   # pilot in the head
+    neck_pilots += at(Manifold.cylinder(40, 1.7, 1.7, SEG).translate((0, 0, NECK_SEAT - 1)))                    # clearance in the neck
+    neck_pilots += at(Manifold.cylinder(NECK_SEAT - 20, 3.3, 3.3, SEG).translate((0, 0, 20)))                     # room for the head and the key
+    neck_pilots += at(Manifold.cylinder(22, 2.6, 2.6, SEG).translate((0, 0, -1)))                               # and for the key through the base
 head = head - fix_pilots - neck_screw_holes
+# A 0.4 mm skin across the opening at the socket's ceiling, so the opening's
+# edges above it have something to print on (without it they sagged into
+# strings). Cut it out with a hobby knife after printing.
+SKIN = 0.4
+head = head + ((bottom_windows ^ box(-100, 100, -100, 100, HEAD_Z0 + SOCKET, HEAD_Z0 + SOCKET + SKIN)) - neck_screw_holes)
 
 
 # =========================================================================================

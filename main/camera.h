@@ -8,6 +8,7 @@
 // Set up the camera. Call from app_main after M5.begin() and before any other
 // task uses the internal I2C bus (the camera shares it with M5Unified).
 bool cameraBegin();
+void cameraSetFlip(bool turned);   // the CoreS3 is mounted turned around: turn the picture 180 degrees
 
 // Start the face-detection task (loads the model; takes a moment).
 // `accurate`: ESPDet-Pico (finds faces far more reliably, ~3x slower per

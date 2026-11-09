@@ -13,6 +13,7 @@ struct BuddyConfig {
     int brightness = 63;           // 0-100
     int dimBrightness = 8;         // 0-100
     bool puppyVoice = true;        // sound_style: puppy (yips, barks) or robot (chirps, boops)
+    bool screenFlip = true;        // screen_flip: the CoreS3 is mounted turned around (camera at the top, ports down)
 
     // Sleepiness
     int sleepAfterSeconds = 60;

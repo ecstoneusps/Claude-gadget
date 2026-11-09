@@ -322,6 +322,7 @@ and restart the buddy.
 | `camera_preview` | Show what the camera sees, with a green box around a detected face (for troubleshooting) |
 | `proximity`, `proximity_sensitivity` | Proximity sensor on/off; lower sensitivity numbers notice you from further away |
 | `radar`, `radar_distance_cm` | Use an LD2410 presence radar on Port C (see below); how close counts as at the desk |
+| `screen_flip` | `on` (default): the CoreS3 is mounted turned around, camera at the top, as in the puppy head; turns the picture, the camera image and the tilt directions to match. `off` for the plain CoreS3 |
 | `flip_tilt_x`, `flip_tilt_y` | Fix tilt reactions that go the wrong way |
 | `wifi_name`, `wifi_password` | Your Wi-Fi (2.4 GHz). Put the password in "quotes" if it contains a `#` |
 | `ha_url` | Home Assistant's address with its IP and port, e.g. `http://192.168.1.20:8123` (`.local` names don't work) |

@@ -125,8 +125,10 @@ static void handleImu(uint32_t now) {
     if (fabsf(mag - 1.0f) > kShakeG) buddy.onShake(now);
 
     // If the eyes look the wrong way on your unit, flip_tilt_x / flip_tilt_y in settings.txt.
-    const float tx = (config.flipTiltX ? 1 : -1) * (ax - restX);
-    const float ty = (config.flipTiltY ? -1 : 1) * (ay - restY);
+    // Turned around (screen_flip), both axes point the other way.
+    const float turn = config.screenFlip ? -1.0f : 1.0f;
+    const float tx = turn * (config.flipTiltX ? 1 : -1) * (ax - restX);
+    const float ty = turn * (config.flipTiltY ? -1 : 1) * (ay - restY);
     if (fabsf(tx) > kTiltG || fabsf(ty) > kTiltG) {
         buddy.onTilt(fminf(fmaxf(tx * 1.5f, -1), 1), fminf(fmaxf(ty * 1.5f, -1), 1), now);
         tilted = true;
@@ -655,8 +657,12 @@ extern "C" void app_main(void) {
     cfg.internal_mic = false;  // audio_io.cpp drives the mics and speaker itself (full duplex)
     cfg.internal_spk = false;
     M5.begin(cfg);
-    M5.Display.setRotation(1);  // landscape, 320x240
     loadSettings();
+    // Landscape, 320x240. In the puppy head the CoreS3 is turned around (camera
+    // at the top, Ports B/C down into the neck), so the picture turns with it;
+    // the touch screen follows the display's rotation.
+    M5.Display.setRotation(config.screenFlip ? 3 : 1);
+    cameraSetFlip(config.screenFlip);
     M5.Display.setBrightness(percentTo255(config.brightness));
 
     canvas.setColorDepth(16);
