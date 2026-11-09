@@ -203,7 +203,9 @@ down / they left" far more reliable than the built-in proximity sensor: it
 notices you sitting perfectly still, a metre or two away, and it sees through
 thin plastic, so it can hide inside a printed body.
 
-Wire it to **Port C** (the blue Grove port) with a Grove-to-female-jumper cable:
+Wire it to **Port C** (the blue Grove port) with a Grove-to-female-jumper cable: (M5Stack's ports have no room for
+the latch on standard Grove plugs: cut the latch hook off, or use M5Stack's own
+latch-free Grove-to-Dupont cable):
 
 | Grove wire | Port C | LD2410 pin |
 |---|---|---|

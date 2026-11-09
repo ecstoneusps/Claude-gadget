@@ -90,7 +90,8 @@ screws.
    middle posts into the DIN base's brass nuts, and two M3 x 16 mm screws into
    the head at the cap's bottom corners. Snug is enough.
 4. Turn the head over and plug the radar's Grove plug into Port C (blue)
-   through the opening in the floor.
+   through the opening in the floor. If your cable's plug has a latch, cut the latch hook off
+   first: the CoreS3's ports have no room for it, and the plug holds by friction.
 5. Set the head on the neck, tucking the cable down into the neck. Turn the
    puppy over and, through the open bottom, drive the two M3 x 12 mm screws up
    through the neck into the head with the long hex key.
