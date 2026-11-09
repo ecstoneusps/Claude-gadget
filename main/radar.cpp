@@ -7,8 +7,12 @@
 static const char* TAG = "radar";
 
 static constexpr uart_port_t kPort = UART_NUM_1;
-static constexpr int kBaud = 256000;  // the LD2410's factory setting
+// The LD2410's factory speed first, then the others its app can set.
+static constexpr int kBauds[] = {256000, 115200, 57600, 38400, 9600};
+static constexpr int kNumBauds = sizeof kBauds / sizeof kBauds[0];
 static constexpr uint32_t kSwapAfterMs = 2500;
+static int s_baud = 0;              // index into kBauds
+static uint32_t s_bytes = 0;        // bytes heard while searching (any at all = it has power)
 
 static bool s_open = false;
 static int s_rx = -1, s_tx = -1;
@@ -35,8 +39,19 @@ void radarBegin() {
         ESP_LOGW(TAG, "this board has no Port C");
         return;
     }
+    // The ports' 5 V comes from a switch the CoreS3 turns on at start. Without
+    // a battery, M5Unified first checks that nothing else is feeding the
+    // ports, and if it can't tell it leaves them off, so the radar gets no
+    // power. Ask again (it waits for the reading), and say what happened.
+    if (!M5.Power.getExtOutput()) {
+        M5.Power.setExtOutput(true);
+        ESP_LOGI(TAG, "5 V to the ports was off; switched on again: %s",
+                 M5.Power.getExtOutput() ? "now on" : "STILL OFF (the radar has no power)");
+    } else {
+        ESP_LOGI(TAG, "5 V to the ports is on");
+    }
     const uart_config_t cfg = {
-        .baud_rate = kBaud,
+        .baud_rate = kBauds[0],
         .data_bits = UART_DATA_8_BITS,
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
@@ -54,7 +69,7 @@ void radarBegin() {
     // about every time ("GPIO 17 is not usable"): expected here, so hush it.
     esp_log_level_set("uart", ESP_LOG_ERROR);
     s_open = true;
-    ESP_LOGI(TAG, "listening on Port C (GPIO %d receive, %d send, %d baud)", s_rx, s_tx, kBaud);
+    ESP_LOGI(TAG, "listening on Port C (GPIO %d receive, %d send, %d baud)", s_rx, s_tx, kBauds[0]);
 }
 
 void radarPoll(uint32_t now) {
@@ -63,11 +78,13 @@ void radarPoll(uint32_t now) {
     uint8_t buf[128];
     int n;
     while ((n = uart_read_bytes(kPort, buf, sizeof buf, 0)) > 0) {
+        if (!s_found) s_bytes += n;
         if (s_parser.feed(buf, n) > 0) {
             s_lastReading = now;
             if (!s_found) {
                 s_found = true;
-                ESP_LOGI(TAG, "LD2410 radar found%s", s_swapped ? " (its signal wires are crossed; handled)" : "");
+                ESP_LOGI(TAG, "LD2410 radar found at %d baud%s", kBauds[s_baud],
+                         s_swapped ? " (its signal wires are crossed; handled)" : "");
             }
         }
     }
@@ -75,12 +92,23 @@ void radarPoll(uint32_t now) {
     // (cheap) so a radar plugged in later is picked up too.
     // After the first minute, try the other wiring only every 30 s.
     const uint32_t swapAfter = s_swaps < 24 ? kSwapAfterMs : 30000;
+    // Each speed is tried with the wires both ways round, then the next speed.
     if (!s_found && now - s_triedSince > swapAfter) {
         s_swapped = !s_swapped;
+        if (!s_swapped) {
+            s_baud = (s_baud + 1) % kNumBauds;
+            uart_set_baudrate(kPort, kBauds[s_baud]);
+        }
         s_triedSince = now;
         applyPins();
-        if (++s_swaps == 4)
-            ESP_LOGI(TAG, "no radar data on Port C (none plugged in? then ignore this)");
+        if (++s_swaps == 2 * kNumBauds) {
+            if (s_bytes == 0)
+                ESP_LOGI(TAG, "no radar on Port C: not a single byte at any speed, either wiring. "
+                              "None plugged in? Then ignore this. Otherwise it has no power: check VCC/GND.");
+            else
+                ESP_LOGI(TAG, "Port C hears something (%u bytes) but no radar data at any speed: "
+                              "check the yellow/white wires, or its baud rate in the HLKRadarTool app", (unsigned)s_bytes);
+        }
     }
 }
 
