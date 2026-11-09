@@ -20,7 +20,7 @@ shared under the same license.
 | `buddy_back_cap.stl` | 67 x 73 x 20 | **Back side down**, posts and groove facing up. The back edges are a 45-degree chamfer: no supports |
 | `buddy_ear_left.stl` + `buddy_ear_left_pink.stl` | 26 x 55 x 4 | Flat side down, no supports. Load both as **one object with two parts**; pink part on the top |
 | `buddy_ear_right.stl` + `buddy_ear_right_pink.stl` | 26 x 55 x 4 | Same |
-| `buddy_body.stl` + `buddy_body_pink.stl` | 78 x 77 x 70 | Standing on its open bottom. Load both as **one object with two parts** (pink = paw pads). **No supports**: every underside, inside and out, slopes at 45 degrees or less down to the bed, and the tail lies on the floor |
+| `buddy_body.stl` + `buddy_body_pink.stl` | 78 x 77 x 70 | Standing on its open bottom. Load both as **one object with two parts** (pink = paw pads, set flush into the front paws). **No supports**: every underside, inside and out, slopes at 45 degrees or less down to the bed, and the tail lies on the floor |
 
 Suggested: PLA, 0.2 mm layers, 3 walls, 15 % infill. In Anycubic Slicer Next
 (or any Orca-based slicer), select a part and its `_pink` file together and

@@ -387,18 +387,39 @@ window = box(-RADAR_W / 2 + GROOVE, RADAR_W / 2 - GROOVE, -60, 60, -10, 100)
 outer_body = torso + chest
 holder = (cheeks ^ outer_body) - board_slot - window
 
-pads = Manifold()
+# Paw pads: a 1.2 mm pink skin set into the front of each front paw, flush with
+# its surface, in the shape of a big pad and three toe beans. (Bumps standing
+# out of the paw, as before, had undersides hanging in mid-air once the paws
+# got their sloped undersides.)
+PAD_SKIN = 1.2
+paw_inner = Manifold()
 for sx in (-1, 1):
-    pads += Manifold.sphere(5.2, SEG).scale((1, 0.35, 0.8)).translate((sx * 13, -14.3, 6))
-    for dx, dz in ((-4.2, -0.6), (0, 0.8), (4.2, -0.6)):
-        pads += Manifold.sphere(2.1, SEG).scale((1, 0.4, 1)).translate((sx * 13 + dx, -13.4, 12.2 + dz))
+    paw_inner += skirted([(sx * 13, 4, 26, 8 - PAD_SKIN), (sx * 13, -2, 7, 9 - PAD_SKIN)]) + \
+        skirted([(sx * 13, -5, 5, 9.5 - PAD_SKIN)])
+pad_shapes = Manifold()
+
+
+def from_front(cx, cz, rx, rz):
+    """An oval seen from the front, as a prism through the front of the paws."""
+    return Manifold.cylinder(30, 1, 1, SEG).scale((rx, rz, 1)).translate((0, 0, -26)).rotate((-90, 0, 0)).translate((cx, 0, cz))
+
+
+for sx in (-1, 1):
+    pad_shapes += from_front(sx * 13, 6.0, 5.0, 4.0)
+    for dx, dz in ((-4.6, -0.6), (0, 0.9), (4.6, -0.6)):
+        pad_shapes += from_front(sx * 13 + dx, 12.6 + dz, 1.9, 2.1)
+paw_outer = Manifold()   # a little beyond the surface, so the cut into the body has no faces just touching
+for sx in (-1, 1):
+    paw_outer += skirted([(sx * 13, 4, 26, 8.5), (sx * 13, -2, 7, 9.5)]) + skirted([(sx * 13, -5, 5, 10.0)])
+pad_cut = ((paw_outer - paw_inner) ^ pad_shapes) ^ box(-100, 100, -100, -2, 0, 100)   # front half only
+pads = pad_cut ^ paws
 
 floor_cut = box(-500, 500, -500, 500, -500, 0)
 body = (torso + chest + paws + hinds + tail + neck) - inside - neck_hole
 body = (body + holder + neck_bosses) - board_slot - floor_cut
 body = body - neck_pilots.translate((0, 0, 0))
 body_pink = pads
-body = body - pads
+body = body - pad_cut
 
 
 # =========================================================================================
