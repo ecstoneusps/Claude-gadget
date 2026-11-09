@@ -50,8 +50,10 @@ thread the first time. Stop at snug, since PLA threads strip if forced.
   (set `screen_flip = on` in `settings.txt`, the default, so the picture,
   camera and tilt match). It slides in from the back, screen first, against
   the front lip. The side windows (power button, USB-C and Port A on one side,
-  the speaker on the other) line up either way. Two blind pilot holes in the
-  floor, beside the opening, take the neck screws.
+  the speaker on the other) line up either way. The pocket's edges around the
+  front are square, so the CoreS3 sits flat against the front lip all round.
+  The opening under the ports is 34 x 16 mm; two blind pilot holes in the
+  floor behind it, over the neck's back wall, take the neck screws.
 
   ![head from below](images/head_below.png)
 - **Back cap:** a U-shaped groove fits over a rim around the left, bottom and
@@ -62,8 +64,9 @@ thread the first time. Stop at snug, since PLA threads strip if forced.
 
   ![back](images/back.png)
 - **Body:** hollow, open at the bottom. The neck on top is a hollow oval tube
-  that fits into the socket under the head, with two bosses for the head
-  screws; tunnels below them let a long hex key reach up from the open bottom.
+  that fits into the socket under the head, with two bosses in its back wall
+  for the head screws; tunnels below them let a long hex key reach up from the
+  open bottom.
   In the middle of the body, two grooved cheeks hold the radar board upright
   (22 x 16 mm), antenna side forward, about 20 mm behind the chest, which the
   24 GHz radar sees through.

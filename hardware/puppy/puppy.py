@@ -40,8 +40,8 @@ SPLIT_Y = CORE_D + GAP_BEHIND               # head / back cap joint
 LIP = 3.0                                   # how far the head's rim reaches into the cap
 
 # --- Neck (part of the body; the head sits on it) --------------------------------------
-NECK_W, NECK_D, NECK_R = 44.0, 28.0, 12.0   # a rounded oval
-NECK_CY = 21.0              # wholly in front of the back cap (at 28 the cap covered the socket's back)
+NECK_W, NECK_D, NECK_R = 44.0, 30.0, 12.0   # a rounded oval
+NECK_CY = 22.0              # wholly in front of the back cap (at 28 the cap covered the socket's back)
 NECK_WALL = 4.0
 SOCKET = 3.5                                # depth of the neck socket in the head
 
@@ -122,7 +122,7 @@ head_outer = blob(head_spheres(0))
 
 ROOF_WALL = 1.0   # straight walls above the CoreS3 before the chamber roof slopes in
 ROOF_TOP = 6.0    # the chamber's flat top, this far above the CoreS3 (a short hidden bridge)
-ROOF_FRONT = 4.0  # the front slope starts this far behind the front wall
+ROOF_FRONT = 0.0  # the front slope starts at the front wall (at 4 mm the pocket's rounded top edge held the CoreS3 off the front)
 
 
 def roof(erode=0.0):
@@ -147,7 +147,13 @@ def roof(erode=0.0):
 
 def head_cavity(erode=0.0):
     """Pocket for the CoreS3 (open to the back) plus the chamber above it."""
-    pocket = rbox(-CORE / 2 + erode, CORE / 2 - erode, 0 + erode, SPLIT_Y + 20, P0 + erode, P0 + CORE - erode, 3)
+    # Rounded only along its four long edges (like the CoreS3's corners); the
+    # edges around the front are square, so the CoreS3 sits flat against the
+    # front lip all round (a rounded top-front edge held it off on a test print).
+    rr = 3.0
+    posts = [Manifold.cylinder(SPLIT_Y + 20 - erode, rr, rr, SEG).rotate((-90, 0, 0)).translate((sx * (CORE / 2 - erode - rr), erode, z))
+             for sx in (-1, 1) for z in (P0 + erode + rr, P0 + CORE - erode - rr)]
+    pocket = Manifold.batch_hull(posts)
     dome = blob(head_spheres(SHELL + erode)) ^ above(P0 + CORE - 1) ^ roof(erode)
     return pocket + dome
 
@@ -164,8 +170,9 @@ for sx in (-1, 1):
     side_windows += w.translate((sx * (CORE / 2 + 3), 0, 0))
 
 # Bottom: DC jack and power switch (as in the original), and the way into the neck.
-# (just the middle: the floor beside it, over the neck's side walls, holds the neck screws)
-bottom_windows = box(-14, 14, 11, 31, HEAD_Z0 - 1, P0 + 1)
+# Under Ports B and C (and their plugs), which face down with the CoreS3 turned
+# around; the floor behind it, over the neck's back wall, holds the neck screws.
+bottom_windows = box(-17, 17, 13, 29, HEAD_Z0 - 1, P0 + 1)
 neck_socket = rrect_prism(0, NECK_CY, NECK_W + 2 * CLEAR, NECK_D + 2 * CLEAR, NECK_R + CLEAR, HEAD_Z0 - 1, HEAD_Z0 + SOCKET)
 
 # Back cap joint: the head keeps a rim reaching LIP mm into the cap.
@@ -252,16 +259,17 @@ back_cap = ((head_outer ^ behind_split) - groove) + posts - screw_holes - fix_ho
 # into blind pilot holes in the head's floor. That way the head goes on last:
 # the CoreS3, with the radar cable plugged into its downward-facing Port C,
 # is already in it. The pocket floor has no holes.
-NECK_SCREW_X = 17.5                    # inside the neck wall, so the key tunnel stays 1.2 mm inside its outside
+NECK_SCREW_X = 8.0                     # two screws in the neck's back wall, 16 mm apart
+NECK_SCREW_Y = NECK_CY + NECK_D / 2 - 4.0   # 4 mm in from the neck's back (its wall)
 NECK_SCREW_L = 12.0                    # M3 x 12 socket head
 NECK_BITE = P0 - 1.2 - (HEAD_Z0 + SOCKET)     # pilot depth in the head's floor (1.2 mm of floor left above)
 NECK_SEAT = HEAD_Z0 + SOCKET + NECK_BITE - NECK_SCREW_L   # the screw head bears on this (facing down, in the boss)
 neck_screw_holes, neck_pilots = Manifold(), Manifold()
 for sx in (-1, 1):
-    at = lambda m: m.translate((sx * NECK_SCREW_X, NECK_CY, 0))
+    at = lambda m: m.translate((sx * NECK_SCREW_X, NECK_SCREW_Y, 0))
     neck_screw_holes += at(Manifold.cylinder(NECK_BITE + SOCKET + 1, 1.25, 1.25, SEG).translate((0, 0, HEAD_Z0 - 1)))   # pilot in the head
     neck_pilots += at(Manifold.cylinder(40, 1.7, 1.7, SEG).translate((0, 0, NECK_SEAT - 1)))                    # clearance in the neck
-    neck_pilots += at(Manifold.cylinder(NECK_SEAT - 20, 3.3, 3.3, SEG).translate((0, 0, 20)))                     # room for the head and the key
+    neck_pilots += at(Manifold.cylinder(NECK_SEAT - 20, 3.1, 3.1, SEG).translate((0, 0, 20)))                     # room for the head and the key
     neck_pilots += at(Manifold.cylinder(22, 2.6, 2.6, SEG).translate((0, 0, -1)))                               # and for the key through the base
 head = head - fix_pilots - neck_screw_holes
 # A 0.4 mm skin across the opening at the socket's ceiling, so the opening's
@@ -343,8 +351,8 @@ neck_hole = rrect_prism(0, NECK_CY, NECK_W - 2 * NECK_WALL, NECK_D - 2 * NECK_WA
 # undersides so they print without support.
 neck_bosses = Manifold()
 for sx in (-1, 1):
-    boss = Manifold.cylinder(14, 4.0, 4.0, SEG).translate((sx * NECK_SCREW_X, NECK_CY, neck_top - 14))
-    boss += Manifold.cylinder(4.0, 0.01, 4.0, SEG).translate((sx * NECK_SCREW_X, NECK_CY, neck_top - 18))
+    boss = Manifold.cylinder(14, 4.0, 4.0, SEG).translate((sx * NECK_SCREW_X, NECK_SCREW_Y, neck_top - 14))
+    boss += Manifold.cylinder(4.0, 0.01, 4.0, SEG).translate((sx * NECK_SCREW_X, NECK_SCREW_Y, neck_top - 18))
     neck_bosses += boss
 neck_bosses = neck_bosses ^ rrect_prism(0, NECK_CY, NECK_W, NECK_D, NECK_R, 0, neck_top)
 
