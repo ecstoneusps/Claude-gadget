@@ -3,6 +3,7 @@
 #include <M5Unified.h>
 #include "driver/uart.h"
 #include "esp_log.h"
+#include "settings.h"
 
 static const char* TAG = "radar";
 
@@ -50,8 +51,14 @@ void radarBegin() {
     } else {
         ESP_LOGI(TAG, "5 V to the ports is on");
     }
+    // Start with the speed and wiring that worked last time (found by trying
+    // them all, which takes a few seconds), so a known radar is found at once.
+    const uint32_t savedBaud = settingsGetU32("radar_baud", 0);
+    for (int i = 0; i < kNumBauds; ++i)
+        if ((uint32_t)kBauds[i] == savedBaud) s_baud = i;
+    s_swapped = savedBaud && settingsGetBool("radar_swap", false);
     const uart_config_t cfg = {
-        .baud_rate = kBauds[0],
+        .baud_rate = kBauds[s_baud],
         .data_bits = UART_DATA_8_BITS,
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
@@ -69,7 +76,8 @@ void radarBegin() {
     // about every time ("GPIO 17 is not usable"): expected here, so hush it.
     esp_log_level_set("uart", ESP_LOG_ERROR);
     s_open = true;
-    ESP_LOGI(TAG, "listening on Port C (GPIO %d receive, %d send, %d baud)", s_rx, s_tx, kBauds[0]);
+    ESP_LOGI(TAG, "listening on Port C (GPIO %d receive, %d send, %d baud%s)", s_rx, s_tx, kBauds[s_baud],
+             savedBaud ? ", as last time" : "");
 }
 
 void radarPoll(uint32_t now) {
@@ -85,6 +93,8 @@ void radarPoll(uint32_t now) {
                 s_found = true;
                 ESP_LOGI(TAG, "LD2410 radar found at %d baud%s", kBauds[s_baud],
                          s_swapped ? " (its signal wires are crossed; handled)" : "");
+                settingsSetU32("radar_baud", (uint32_t)kBauds[s_baud]);
+                settingsSetBool("radar_swap", s_swapped);
             }
         }
     }

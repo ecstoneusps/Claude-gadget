@@ -28,6 +28,23 @@ bool settingsGetBool(const char* key, bool fallback) {
     return v != 0;
 }
 
+uint32_t settingsGetU32(const char* key, uint32_t fallback) {
+    uint32_t v;
+    if (!s_nvs || nvs_get_u32(s_nvs, key, &v) != ESP_OK) return fallback;
+    return v;
+}
+
+void settingsSetU32(const char* key, uint32_t value) {
+    if (!s_nvs) return;
+    uint32_t old;
+    if (nvs_get_u32(s_nvs, key, &old) == ESP_OK && old == value) return;  // spare the flash
+    if (nvs_set_u32(s_nvs, key, value) == ESP_OK && nvs_commit(s_nvs) == ESP_OK) {
+        ESP_LOGI(TAG, "saved %s = %u", key, (unsigned)value);
+    } else {
+        ESP_LOGW(TAG, "could not save %s", key);
+    }
+}
+
 void settingsSetBool(const char* key, bool value) {
     if (!s_nvs) return;
     uint8_t old;

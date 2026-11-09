@@ -7,3 +7,6 @@
 void settingsBegin();                                  // call once at startup
 bool settingsGetBool(const char* key, bool fallback);  // fallback if never saved
 void settingsSetBool(const char* key, bool value);     // only writes if it changed
+#include <stdint.h>
+uint32_t settingsGetU32(const char* key, uint32_t fallback);
+void settingsSetU32(const char* key, uint32_t value);  // only writes if it changed
