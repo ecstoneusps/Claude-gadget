@@ -422,3 +422,4 @@ works without a card.
 11. Recognize you (face recognition, enrolled face stored on the card)
 12. ~~AI conversation: speech-to-text → LLM → emotion tag drives the face, with spoken replies~~
 13. Home Assistant sensors and controls over MQTT (desk occupied, light level, battery, mood)
+14. Maybe: a moving head (pan/tilt servos), e.g. M5Stack StackChan's body: see [docs/motorizing-notes.md](docs/motorizing-notes.md)
