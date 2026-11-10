@@ -12,21 +12,90 @@
 
 static const char* TAG = "wifi";
 
+static std::vector<std::pair<std::string, std::string>> s_networks;
 static std::atomic<bool> s_connected{false};
 static std::atomic<const char*> s_status{"off"};
-static int s_failures = 0;
+static std::atomic<int> s_current{-1};  // network connected to (or being tried)
+static std::atomic<int> s_onNet{-1};    // network connected to
+static int s_failures = 0;              // failed attempts on the current network
+static int s_rotate = 0;                // when none show up in a scan, try them in turn (hidden networks)
 static bool s_started = false;
+static bool s_scanning = false;
+static bool s_wantScan = false;        // the next retry looks around first
 static esp_timer_handle_t s_retry = nullptr;
 
-static void retry(void*) { esp_wifi_connect(); }
+static void useNetwork(int i) {
+    s_current.store(i);
+    const auto& n = s_networks[i];
+    wifi_config_t cfg = {};
+    strncpy((char*)cfg.sta.ssid, n.first.c_str(), sizeof cfg.sta.ssid);
+    strncpy((char*)cfg.sta.password, n.second.c_str(), sizeof cfg.sta.password);
+    cfg.sta.threshold.authmode = n.second.empty() ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA_PSK;
+    cfg.sta.pmf_cfg.capable = true;
+    cfg.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;  // pick the strongest access point
+    cfg.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    esp_wifi_set_config(WIFI_IF_STA, &cfg);
+    ESP_LOGI(TAG, "connecting to \"%s\"%s", n.first.c_str(), i == 0 ? "" : " (not the first network)");
+    esp_wifi_connect();
+}
+
+// Looks around for the saved networks; onEvent(SCAN_DONE) picks one.
+static void startScan() {
+    if (s_networks.size() == 1) {  // nothing to choose between
+        useNetwork(0);
+        return;
+    }
+    wifi_scan_config_t sc = {};
+    sc.show_hidden = false;
+    if (esp_wifi_scan_start(&sc, false) == ESP_OK) s_scanning = true;
+    else useNetwork(0);
+}
+
+static void pickFromScan() {
+    s_scanning = false;
+    uint16_t count = 0;
+    esp_wifi_scan_get_ap_num(&count);
+    std::vector<bool> seen(s_networks.size(), false);
+    if (count > 0) {
+        auto* recs = (wifi_ap_record_t*)heap_caps_calloc(count, sizeof(wifi_ap_record_t), MALLOC_CAP_SPIRAM);
+        if (recs && esp_wifi_scan_get_ap_records(&count, recs) == ESP_OK) {
+            for (uint16_t r = 0; r < count; ++r)
+                for (size_t i = 0; i < s_networks.size(); ++i)
+                    if (s_networks[i].first == (const char*)recs[r].ssid) seen[i] = true;
+        } else {
+            esp_wifi_clear_ap_list();
+        }
+        heap_caps_free(recs);
+    }
+    for (size_t i = 0; i < s_networks.size(); ++i) {
+        if (seen[i]) {
+            useNetwork((int)i);
+            return;
+        }
+    }
+    // None in sight: maybe one is hidden. Try them in turn between scans.
+    s_status.store("no saved network in range");
+    useNetwork(s_rotate++ % (int)s_networks.size());
+}
+
+static void retry(void*) {
+    // A few quick retries on the same network, then look around again (it may
+    // be out of range now, and another saved network in range).
+    if (s_wantScan) startScan();
+    else esp_wifi_connect();
+}
 
 static void onEvent(void*, esp_event_base_t base, int32_t id, void* data) {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         s_status.store("connecting");
-        esp_wifi_connect();
+        startScan();
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
+        pickFromScan();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         const auto* d = (wifi_event_sta_disconnected_t*)data;
         const bool wasConnected = s_connected.exchange(false);
+        s_onNet.store(-1);
+        if (wasConnected) s_failures = 0;
         switch (d->reason) {
             case WIFI_REASON_AUTH_FAIL:
             case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
@@ -34,30 +103,43 @@ static void onEvent(void*, esp_event_base_t base, int32_t id, void* data) {
                 s_status.store("wrong password");
                 break;
             case WIFI_REASON_NO_AP_FOUND:
-                s_status.store("network not found");
+                s_status.store(s_networks.size() > 1 ? "no saved network in range" : "network not found");
                 break;
             default:
                 s_status.store("connecting");
         }
         // Log the first few failures and then only now and then.
-        if (wasConnected || s_failures < 3 || s_failures % 30 == 0)
-            ESP_LOGW(TAG, "disconnected (reason %d: %s), retrying", d->reason, s_status.load());
-        ++s_failures;
-        // Back off a little so a missing network doesn't spin the radio.
+        static int logged = 0;
+        if (wasConnected || logged < 3 || logged % 30 == 0) {
+            const int cur = s_current.load();
+            ESP_LOGW(TAG, "disconnected from \"%s\" (reason %d: %s), retrying",
+                     cur >= 0 ? s_networks[cur].first.c_str() : "?", d->reason, s_status.load());
+        }
+        ++logged;
+        // A few quick retries, then a pause and a fresh look around (backing
+        // off so a missing network doesn't spin the radio).
+        s_wantScan = ++s_failures >= 3;
+        if (s_wantScan) s_failures = 0;
         esp_timer_stop(s_retry);
-        esp_timer_start_once(s_retry, (s_failures < 5 ? 500 : 5000) * 1000ull);
+        esp_timer_start_once(s_retry, (s_wantScan ? 5000 : 500) * 1000ull);
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         const auto* e = (ip_event_got_ip_t*)data;
-        ESP_LOGI(TAG, "connected, address " IPSTR, IP2STR(&e->ip_info.ip));
+        const int cur = s_current.load();
+        ESP_LOGI(TAG, "connected to \"%s\", address " IPSTR, cur >= 0 ? s_networks[cur].first.c_str() : "?",
+                 IP2STR(&e->ip_info.ip));
         s_failures = 0;
         s_status.store("connected");
+        s_onNet.store(cur);
         s_connected.store(true);
     }
 }
 
-bool wifiStart(const std::string& ssid, const std::string& password) {
-    if (ssid.empty()) return false;
-    ESP_LOGI(TAG, "starting (%u KB internal RAM free)", (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
+bool wifiStart(const std::vector<std::pair<std::string, std::string>>& networks) {
+    if (networks.empty()) return false;
+    s_networks = networks;
+    ESP_LOGI(TAG, "starting (%u KB internal RAM free, %u saved network%s)",
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024), (unsigned)networks.size(),
+             networks.size() == 1 ? "" : "s");
     esp_err_t err = esp_netif_init();
     if (err == ESP_OK) err = esp_event_loop_create_default();
     if (err == ESP_ERR_INVALID_STATE) err = ESP_OK;  // already created
@@ -82,16 +164,8 @@ bool wifiStart(const std::string& ssid, const std::string& password) {
     esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, onEvent, nullptr);
     esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, onEvent, nullptr);
 
-    wifi_config_t cfg = {};
-    strncpy((char*)cfg.sta.ssid, ssid.c_str(), sizeof cfg.sta.ssid);
-    strncpy((char*)cfg.sta.password, password.c_str(), sizeof cfg.sta.password);
-    cfg.sta.threshold.authmode = password.empty() ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA_PSK;
-    cfg.sta.pmf_cfg.capable = true;
-    cfg.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;  // pick the strongest access point
-    cfg.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
     esp_wifi_set_storage(WIFI_STORAGE_RAM);  // settings.txt is the source of truth
     esp_wifi_set_mode(WIFI_MODE_STA);
-    esp_wifi_set_config(WIFI_IF_STA, &cfg);
     if ((err = esp_wifi_start()) != ESP_OK) {
         ESP_LOGE(TAG, "start failed: %s", esp_err_to_name(err));
         s_status.store(err == ESP_ERR_NO_MEM ? "FAILED: out of memory" : "FAILED to start");
@@ -101,10 +175,14 @@ bool wifiStart(const std::string& ssid, const std::string& password) {
     // should come back as fast as possible.
     esp_wifi_set_ps(WIFI_PS_NONE);
     s_started = true;
-    ESP_LOGI(TAG, "connecting to \"%s\"", ssid.c_str());
     return true;
 }
 
 bool wifiConnected() { return s_connected.load(); }
 bool wifiConnectedOrStarting() { return s_started; }
 const char* wifiStatus() { return s_status.load(); }
+int wifiNetworkIndex() { return s_onNet.load(); }
+const char* wifiNetworkName() {
+    const int i = s_onNet.load();
+    return i >= 0 ? s_networks[i].first.c_str() : "";
+}

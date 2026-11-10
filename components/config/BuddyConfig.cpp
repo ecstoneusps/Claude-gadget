@@ -198,13 +198,20 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
         } else if (key == "wifi_password") {
             if (!val.empty() && (val.size() < 8 || val.size() > 63)) bad("must be 8-63 characters");
             else cfg.wifiPassword = val;
-        } else if (key == "ha_url") {
+        } else if ((key == "wifi_name_2" || key == "wifi_name_3")) {
+            if (val.size() > 32) bad("can be at most 32 characters");
+            else cfg.wifiNameN[key.back() - '2'] = val;
+        } else if ((key == "wifi_password_2" || key == "wifi_password_3")) {
+            if (!val.empty() && (val.size() < 8 || val.size() > 63)) bad("must be 8-63 characters");
+            else cfg.wifiPasswordN[key.back() - '2'] = val;
+        } else if (key == "ha_url" || key == "ha_url_away") {
             std::string v = val;
             while (!v.empty() && v.back() == '/') v.pop_back();
             const std::string lv = lower(v);
             if (!v.empty() && lv.rfind("http://", 0) != 0 && lv.rfind("https://", 0) != 0)
-                bad("must start with http:// or https:// (e.g. http://192.168.1.20:8123)");
-            else cfg.haUrl = v;
+                bad(key == "ha_url" ? "must start with http:// or https:// (e.g. http://192.168.1.20:8123)"
+                                    : "must start with https:// (e.g. https://homeassistant.your-tailnet.ts.net)");
+            else (key == "ha_url" ? cfg.haUrl : cfg.haUrlAway) = v;
         } else if (key == "ha_token") {
             if (val.find(' ') != std::string::npos) bad("must not contain spaces");
             else cfg.haToken = val;
@@ -277,9 +284,14 @@ void addAiSection(std::string& t) {
     add("# --- Talking with the AI (through Home Assistant) ---");
     add("# Fill in all four to talk to Buddy's AI. Put \"quotes\" around the password");
     add("# if it has a # in it. Keep this card private: the token is a password.");
-    str("wifi_name", d.wifiName, "your Wi-Fi network (2.4 GHz)");
+    str("wifi_name", d.wifiName, "your home Wi-Fi network (2.4 GHz)");
     str("wifi_password", d.wifiPassword, "its password");
-    str("ha_url", d.haUrl, "Home Assistant's address, e.g. http://192.168.1.20:8123");
+    str("wifi_name_2", d.wifiNameN[0], "optional: another network if home isn't in range, e.g. your phone's hotspot");
+    str("wifi_password_2", d.wifiPasswordN[0], "its password");
+    str("wifi_name_3", d.wifiNameN[1], "optional: a third network, tried after the second");
+    str("wifi_password_3", d.wifiPasswordN[1], "its password");
+    str("ha_url", d.haUrl, "Home Assistant's address at home, e.g. http://192.168.1.20:8123");
+    str("ha_url_away", d.haUrlAway, "optional: its address from anywhere else, e.g. a Tailscale Funnel https://...ts.net");
     str("ha_token", d.haToken, "long-lived access token (from the Desk Buddy user)");
     str("ha_pipeline", d.haPipeline, "name of the voice assistant in Home Assistant");
     onoff("conversation", d.conversation, "off = only the built-in commands");

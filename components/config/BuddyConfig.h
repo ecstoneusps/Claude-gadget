@@ -49,9 +49,15 @@ struct BuddyConfig {
     bool flipTiltY = false;
 
     // Talking with the AI, through Home Assistant's voice assistant
-    std::string wifiName;
+    std::string wifiName;            // the home network: tried first
     std::string wifiPassword;
-    std::string haUrl;               // http://192.168.1.20:8123
+    // More networks (a phone's hotspot, a friend's Wi-Fi), tried in order when
+    // the ones before them aren't in range.
+    static constexpr int kExtraWifi = 2;
+    std::string wifiNameN[kExtraWifi];      // wifi_name_2, wifi_name_3
+    std::string wifiPasswordN[kExtraWifi];  // wifi_password_2, wifi_password_3
+    std::string haUrl;               // http://192.168.1.20:8123 (on the home network)
+    std::string haUrlAway;           // used on any other network, e.g. a Tailscale Funnel https address ("" = ha_url)
     std::string haToken;             // long-lived access token: never logged
     std::string haPipeline = "Buddy";  // the voice assistant's name in Home Assistant
     bool conversation = true;        // off: only the built-in commands, even with Wi-Fi set up
@@ -63,7 +69,15 @@ struct BuddyConfig {
     std::string visionUrl;           // http://192.168.4.98:11434 ("" = no vision)
     std::string visionModel = "gemma3:4b";
 
-    bool aiConfigured() const { return conversation && !wifiName.empty() && !haUrl.empty() && !haToken.empty(); }
+    // Every network to try, in order (empty names left out). The first is home.
+    std::vector<std::pair<std::string, std::string>> wifiNetworks() const {
+        std::vector<std::pair<std::string, std::string>> out;
+        if (!wifiName.empty()) out.push_back({wifiName, wifiPassword});
+        for (int i = 0; i < kExtraWifi; ++i)
+            if (!wifiNameN[i].empty()) out.push_back({wifiNameN[i], wifiPasswordN[i]});
+        return out;
+    }
+    bool aiConfigured() const { return conversation && !wifiNetworks().empty() && !haUrl.empty() && !haToken.empty(); }
 };
 
 // Reads settings.txt contents into `cfg` (starting from whatever it holds,

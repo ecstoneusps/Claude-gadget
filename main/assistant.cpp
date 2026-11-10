@@ -57,6 +57,12 @@ static size_t s_lookLen = 0;
 static std::string s_lookQuestion;
 static bool s_lookFromConversation = false;
 static std::string s_lookMarker;  // posted to the inbox (compared by address)
+// Home Assistant's address for the Wi-Fi network it's on: ha_url at home (the
+// first network), ha_url_away on any other one (if set).
+static std::string s_baseUrl;
+static int s_baseNet = -2;
+static std::string baseUrlFor(int net) { return (net > 0 && !s_cfg.urlAway.empty()) ? s_cfg.urlAway : s_cfg.url; }
+static bool awayFromHome() { return wifiNetworkIndex() > 0; }
 static std::string s_sayMarker;   // likewise: say s_sayText out loud
 static std::string s_sayText;
 // Assistant task only: the last photo and what was said about it, so
@@ -291,7 +297,7 @@ static bool speak(const std::string& text) {
     if (!body) return false;
 
     const std::string auth = "Bearer " + s_cfg.token;
-    std::string url = s_cfg.url + "/api/tts_get_url";
+    std::string url = s_baseUrl + "/api/tts_get_url";
     esp_http_client_config_t hc = {};
     hc.url = url.c_str();
     hc.method = HTTP_METHOD_POST;
@@ -315,7 +321,7 @@ static bool speak(const std::string& text) {
         ok = status == 200;
         if (!ok) ESP_LOGW(TAG, "text-to-speech request failed: HTTP %d %.120s", status, resp.c_str());
     } else {
-        ESP_LOGW(TAG, "couldn't reach %s", s_cfg.url.c_str());
+        ESP_LOGW(TAG, "couldn't reach %s", s_baseUrl.c_str());
     }
     cJSON_free(body);
     esp_http_client_cleanup(http);
@@ -324,7 +330,7 @@ static bool speak(const std::string& text) {
     cJSON* j = cJSON_Parse(resp.c_str());
     const char* path = j ? jstr(j, "path") : nullptr;
     const char* full = j ? jstr(j, "url") : nullptr;
-    if (path) url = s_cfg.url + path;
+    if (path) url = s_baseUrl + path;
     else if (full) url = full;
     else url.clear();
     cJSON_Delete(j);
@@ -514,6 +520,11 @@ static void handleHeard(const std::string& text) {
     // Asking about what it sees: a fresh photo (the main loop takes it and
     // calls assistantLook). The microphones keep waiting meanwhile.
     if (!s_cfg.visionUrl.empty() && isVisionRequest(text)) {
+        if (awayFromHome()) {  // the vision model is on the home network only (it has no password)
+            ESP_LOGI(TAG, "-> asked to look, but away from home: no vision");
+            deliverReply("[sad] I can only see things when I'm at home.", true);
+            return;
+        }
         ESP_LOGI(TAG, "-> taking a look");
         finishTurn();
         s_turnActive.store(true);  // until the photo arrives
@@ -867,7 +878,9 @@ static void handleMessage(const std::string& text) {
 
 static void startWebsocket() {
     static std::string uri;
-    uri = s_cfg.url;
+    s_baseNet = wifiNetworkIndex();
+    s_baseUrl = baseUrlFor(s_baseNet);
+    uri = s_baseUrl;
     if (uri.rfind("https://", 0) == 0) uri = "wss://" + uri.substr(8);
     else if (uri.rfind("http://", 0) == 0) uri = "ws://" + uri.substr(7);
     uri += "/api/websocket";
@@ -914,6 +927,22 @@ static void assistantTask(void*) {
                 delete msg;
             } else if (s_stage != Stage::Idle) {
                 failTurn("lost the connection to Home Assistant");  // disconnected mid-turn
+            }
+        }
+        // Moved to another Wi-Fi network: if Home Assistant has a different
+        // address there (ha_url at home, ha_url_away elsewhere), reconnect to it.
+        if (s_ws && wifiConnected() && wifiNetworkIndex() != s_baseNet) {
+            const int net = wifiNetworkIndex();
+            if (baseUrlFor(net) == s_baseUrl) {
+                s_baseNet = net;
+            } else {
+                ESP_LOGI(TAG, "now on \"%s\": switching to %s", wifiNetworkName(), baseUrlFor(net).c_str());
+                if (s_stage != Stage::Idle) failTurn("switched Wi-Fi networks");
+                s_ready.store(false);
+                esp_websocket_client_stop(s_ws);
+                esp_websocket_client_destroy(s_ws);
+                s_ws = nullptr;
+                startWebsocket();
             }
         }
         if (s_tokenRejected) {
@@ -983,7 +1012,7 @@ void assistantEndAudio(bool heardSpeech) {
 
 bool assistantSttDone() { return s_sttDone.load(); }
 
-bool assistantCanSee() { return !s_cfg.visionUrl.empty() && s_ready.load(); }
+bool assistantCanSee() { return !s_cfg.visionUrl.empty() && s_ready.load() && !awayFromHome(); }
 
 bool assistantSay(const std::string& text) {
     if (!s_inbox || !s_ready.load()) return false;

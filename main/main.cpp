@@ -325,6 +325,7 @@ static void voiceInitTask(void*) {
     if (voiceOk.load() && config.aiConfigured() && wifiConnectedOrStarting()) {
         AssistantConfig ac;
         ac.url = config.haUrl;
+        ac.urlAway = config.haUrlAway;
         ac.token = config.haToken;
         ac.pipeline = config.haPipeline;
         ac.followUp = config.followUp;
@@ -376,14 +377,17 @@ static void loadSettings() {
              config.faceTracking ? "on" : "off", config.proximity ? "on" : "off");
     // Never log the token or password themselves.
     if (config.aiConfigured()) {
-        ESP_LOGI(TAG, "AI conversation: Wi-Fi \"%s\", Home Assistant %s, voice assistant \"%s\", token set (%u chars)",
-                 config.wifiName.c_str(), config.haUrl.c_str(), config.haPipeline.c_str(),
+        std::string nets;
+        for (const auto& n : config.wifiNetworks()) nets += (nets.empty() ? "\"" : ", \"") + n.first + "\"";
+        ESP_LOGI(TAG, "AI conversation: Wi-Fi %s, Home Assistant %s%s%s, voice assistant \"%s\", token set (%u chars)",
+                 nets.c_str(), config.haUrl.c_str(), config.haUrlAway.empty() ? "" : " (away: ",
+                 config.haUrlAway.empty() ? "" : (config.haUrlAway + ")").c_str(), config.haPipeline.c_str(),
                  (unsigned)config.haToken.size());
     } else if (!config.conversation) {
         ESP_LOGI(TAG, "AI conversation: off (conversation = off)");
     } else {
         ESP_LOGI(TAG, "AI conversation: not set up (missing%s%s%s in settings.txt)",
-                 config.wifiName.empty() ? " wifi_name" : "", config.haUrl.empty() ? " ha_url" : "",
+                 config.wifiNetworks().empty() ? " wifi_name" : "", config.haUrl.empty() ? " ha_url" : "",
                  config.haToken.empty() ? " ha_token" : "");
     }
 }
@@ -700,7 +704,7 @@ extern "C" void app_main(void) {
     assistEvents = xQueueCreate(8, sizeof(AssistEvent));
     // Wi-Fi first, while internal RAM is still in one piece: it needs a few
     // contiguous blocks that weren't left once the camera and models loaded.
-    if (config.aiConfigured()) wifiStart(config.wifiName, config.wifiPassword);
+    if (config.aiConfigured()) wifiStart(config.wifiNetworks());
     sharedI2cBus();                       // before other tasks touch the I2C bus
     // The camera only runs if something uses it: it captures frames
     // continuously once started, even with nothing looking at them.

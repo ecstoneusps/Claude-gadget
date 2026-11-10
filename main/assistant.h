@@ -18,7 +18,8 @@
 // speech (Piper) and played with the mouth moving along.
 
 struct AssistantConfig {
-    std::string url;       // http://192.168.1.20:8123
+    std::string url;       // http://192.168.1.20:8123 (on the home network, the first Wi-Fi)
+    std::string urlAway;   // on any other network ("" = url), e.g. https://homeassistant.tailnet.ts.net
     std::string token;     // long-lived access token (never logged)
     std::string pipeline;  // voice assistant name in Home Assistant ("" = its preferred one)
     bool followUp = true;  // listen again after each answer

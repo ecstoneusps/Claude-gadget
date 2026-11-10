@@ -62,6 +62,32 @@ static void test_values_and_formats() {
     CHECK(!cfg.accurateFaceModel);
 }
 
+static void test_several_wifi_networks() {
+    BuddyConfig cfg;
+    std::vector<std::string> w;
+    parseConfig("wifi_name = Home\nwifi_password = homepass1\n"
+                "wifi_name_2 = \"Eric's iPhone\"\nwifi_password_2 = phonepass\n"
+                "wifi_name_3 =\n"
+                "ha_url = http://192.168.4.97:8123/\nha_url_away = https://ha.tail1234.ts.net\nha_token = abc\n",
+                cfg, w);
+    for (auto& s : w) printf("  unexpected warning: %s\n", s.c_str());
+    CHECK(w.empty());
+    const auto nets = cfg.wifiNetworks();
+    CHECK(nets.size() == 2);  // the empty third one is left out
+    CHECK(nets.size() == 2 && nets[0].first == "Home" && nets[1].first == "Eric's iPhone" && nets[1].second == "phonepass");
+    CHECK(cfg.haUrl == "http://192.168.4.97:8123" && cfg.haUrlAway == "https://ha.tail1234.ts.net");
+    CHECK(cfg.aiConfigured());
+    // Only a hotspot set up (no home network) still counts as set up.
+    BuddyConfig c2;
+    parseConfig("wifi_name_2 = Hotspot\nha_url = http://x:8123\nha_token = t\n", c2, w);
+    CHECK(c2.aiConfigured() && c2.wifiNetworks().size() == 1);
+    // A bad away address warns.
+    BuddyConfig c3;
+    std::vector<std::string> w3;
+    parseConfig("ha_url_away = ha.tail1234.ts.net\nwifi_password_3 = short\n", c3, w3);
+    CHECK(w3.size() == 2 && c3.haUrlAway.empty());
+}
+
 static void test_bad_lines_warn_and_keep_defaults() {
     BuddyConfig cfg;
     std::vector<std::string> w;
@@ -268,6 +294,7 @@ int main(int argc, char** argv) {
     struct { const char* name; void (*fn)(); } tests[] = {
         {"default file round trips", test_default_file_round_trips},
         {"values and formats", test_values_and_formats},
+        {"several Wi-Fi networks, away address", test_several_wifi_networks},
         {"bad lines warn and keep defaults", test_bad_lines_warn_and_keep_defaults},
         {"extra phrases", test_extra_phrases},
         {"command keys round trip", test_command_keys_round_trip},

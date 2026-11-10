@@ -326,8 +326,10 @@ and restart the buddy.
 | `radar`, `radar_distance_cm` | Use an LD2410 presence radar on Port C (see below); how close counts as at the desk |
 | `screen_flip` | `on` (default): the CoreS3 is mounted turned around, camera at the top, as in the puppy head; turns the picture, the camera image and the tilt directions to match. `off` for the plain CoreS3 |
 | `flip_tilt_x`, `flip_tilt_y` | Fix tilt reactions that go the wrong way |
-| `wifi_name`, `wifi_password` | Your Wi-Fi (2.4 GHz). Put the password in "quotes" if it contains a `#` |
-| `ha_url` | Home Assistant's address with its IP and port, e.g. `http://192.168.1.20:8123` (`.local` names don't work) |
+| `wifi_name`, `wifi_password` | Your home Wi-Fi (2.4 GHz). Put the password in "quotes" if it contains a `#` |
+| `ha_url` | Home Assistant's address with its IP and port, e.g. `http://192.168.1.20:8123` (`.local` names don't work), used on the home network |
+| `wifi_name_2`, `wifi_password_2`, `wifi_name_3`, `wifi_password_3` | Optional extra networks, such as your phone's hotspot (set it to 2.4 GHz / "maximize compatibility"). Buddy joins the first network in the list that's in range, and looks again whenever the connection drops |
+| `ha_url_away` | Optional: Home Assistant's address from anywhere else, used on any network but the home one, e.g. a Tailscale Funnel address `https://homeassistant.your-tailnet.ts.net`. "What do you see?" only works at home, since the vision model has no password and must not be put on the internet |
 | `ha_token` | A long-lived access token for the Home Assistant user the buddy logs in as |
 | `ha_pipeline` | The voice assistant to use, by its name in Home Assistant (default `Buddy`) |
 | `conversation` | `off` uses only the built-in commands, even with the above filled in |
