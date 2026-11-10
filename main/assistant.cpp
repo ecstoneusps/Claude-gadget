@@ -61,8 +61,9 @@ static std::string s_lookMarker;  // posted to the inbox (compared by address)
 // first network), ha_url_away on any other one (if set).
 static std::string s_baseUrl;
 static int s_baseNet = -2;
-static std::string baseUrlFor(int net) { return (net > 0 && !s_cfg.urlAway.empty()) ? s_cfg.urlAway : s_cfg.url; }
-static bool awayFromHome() { return wifiNetworkIndex() > 0; }
+static bool isAway(int net) { return net > 0 || (net == 0 && !s_cfg.firstNetworkIsHome); }
+static std::string baseUrlFor(int net) { return (isAway(net) && !s_cfg.urlAway.empty()) ? s_cfg.urlAway : s_cfg.url; }
+static bool awayFromHome() { return isAway(wifiNetworkIndex()); }
 static std::string s_sayMarker;   // likewise: say s_sayText out loud
 static std::string s_sayText;
 // Assistant task only: the last photo and what was said about it, so

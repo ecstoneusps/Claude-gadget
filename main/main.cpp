@@ -326,6 +326,7 @@ static void voiceInitTask(void*) {
         AssistantConfig ac;
         ac.url = config.haUrl;
         ac.urlAway = config.haUrlAway;
+        ac.firstNetworkIsHome = !config.wifiName.empty();
         ac.token = config.haToken;
         ac.pipeline = config.haPipeline;
         ac.followUp = config.followUp;
