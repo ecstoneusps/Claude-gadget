@@ -320,6 +320,14 @@ change him unnoticed. Wi-Fi passwords and the Home Assistant token show as
 them, or type a new one over them. The page lists any lines with mistakes
 (those are ignored, as usual).
 
+**If no saved Wi-Fi network works** (out of range, a wrong name or password)
+for 2 minutes, or none is saved yet, Buddy opens his own open Wi-Fi network,
+**`Buddy Setup`**, and his screen says so. Join it with your phone (ignore the
+"no internet" warning) and open **http://192.168.71.1/** to fix the settings;
+the tap on his screen is still needed. He keeps looking for his saved networks
+meanwhile and turns the setup network off once one works.
+`setup_hotspot = off` turns this off.
+
 Put a FAT32-formatted microSD card in the slot on the side. On its first start
 with the card, the buddy writes a commented **`settings.txt`** to it (the same
 file as [`sdcard/settings.txt`](sdcard/settings.txt) in this repo, which you can
@@ -343,6 +351,7 @@ and restart the buddy.
 | `wifi_name`, `wifi_password` | Your home Wi-Fi (2.4 GHz). Put the password in "quotes" if it contains a `#` |
 | `ha_url` | Home Assistant's address with its IP and port, e.g. `http://192.168.1.20:8123` (`.local` names don't work), used on the home network |
 | `wifi_name_2`, `wifi_password_2`, `wifi_name_3`, `wifi_password_3` | Optional extra networks, such as your phone's hotspot (set it to 2.4 GHz / "maximize compatibility"). Buddy joins the first network in the list that's in range, and looks again whenever the connection drops |
+| `setup_hotspot` | `on` (default): if no saved network works for 2 minutes, Buddy opens the `Buddy Setup` Wi-Fi so you can reach the settings page at http://192.168.71.1/ |
 | `ha_url_away` | Optional: Home Assistant's address from anywhere else, used on any network but the home one, e.g. a Tailscale Funnel address `https://homeassistant.your-tailnet.ts.net`. "What do you see?" only works at home, since the vision model has no password and must not be put on the internet |
 | `ha_token` | A long-lived access token for the Home Assistant user the buddy logs in as |
 | `ha_pipeline` | The voice assistant to use, by its name in Home Assistant (default `Buddy`) |

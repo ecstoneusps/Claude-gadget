@@ -600,9 +600,30 @@ static void drawSettingsPrompt(uint32_t now) {
 // For 20 s after Wi-Fi first connects, the settings page's address shows at
 // the bottom of the screen. Returns true while it's showing (and one frame
 // after, to clear it).
+static void drawBottomLine(const std::string& text, uint16_t color) {
+    canvas.setFont(&fonts::FreeSans9pt7b);
+    canvas.setTextDatum(bottom_center);
+    canvas.fillRect(0, canvas.height() - 26, canvas.width(), 26, TFT_BLACK);
+    canvas.setTextColor(color);
+    canvas.drawString(text.c_str(), canvas.width() / 2, canvas.height() - 5);
+}
+
 static bool drawAddress(uint32_t now) {
     static uint32_t since = 0;
     static int state = 0;  // 0 = not yet, 1 = showing, 2 = done
+    static bool hotspotShown = false;
+    // The setup hotspot is on: say how to reach the settings page, for as
+    // long as it's on.
+    if (wifiSetupHotspotOn()) {
+        drawBottomLine("Join Wi-Fi \"Buddy Setup\", open 192.168.71.1", TFT_YELLOW);
+        hotspotShown = true;
+        return true;
+    }
+    if (hotspotShown) {  // back on a real network: clear the hint, then show the new address
+        hotspotShown = false;
+        state = 0;
+        return true;
+    }
     if (state == 2) return false;
     if (state == 0) {
         if (webuiAddress().empty()) return false;
@@ -614,12 +635,7 @@ static bool drawAddress(uint32_t now) {
         state = 2;
         return true;  // redraw once without it
     }
-    const std::string addr = "Settings: " + webuiAddress();
-    canvas.setFont(&fonts::FreeSans9pt7b);
-    canvas.setTextDatum(bottom_center);
-    canvas.fillRect(0, canvas.height() - 26, canvas.width(), 26, TFT_BLACK);
-    canvas.setTextColor(TFT_LIGHTGREY);
-    canvas.drawString(addr.c_str(), canvas.width() / 2, canvas.height() - 5);
+    drawBottomLine("Settings: " + webuiAddress(), TFT_LIGHTGREY);
     return true;
 }
 
@@ -773,7 +789,9 @@ extern "C" void app_main(void) {
     assistEvents = xQueueCreate(8, sizeof(AssistEvent));
     // Wi-Fi first, while internal RAM is still in one piece: it needs a few
     // contiguous blocks that weren't left once the camera and models loaded.
-    if (config.aiConfigured() && wifiStart(config.wifiNetworks())) webuiStart(kSettingsFile);
+    // Wi-Fi for the AI and the settings page. With no network saved (or none
+    // working) Buddy opens his own "Buddy Setup" network for the settings page.
+    if (wifiStart(config.wifiNetworks(), config.setupHotspot)) webuiStart(kSettingsFile);
     sharedI2cBus();                       // before other tasks touch the I2C bus
     // The camera only runs if something uses it: it captures frames
     // continuously once started, even with nothing looking at them.

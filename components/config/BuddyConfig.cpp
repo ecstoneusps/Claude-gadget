@@ -204,6 +204,8 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
         } else if ((key == "wifi_password_2" || key == "wifi_password_3")) {
             if (!val.empty() && (val.size() < 8 || val.size() > 63)) bad("must be 8-63 characters");
             else cfg.wifiPasswordN[key.back() - '2'] = val;
+        } else if (key == "setup_hotspot") {
+            if (!parseBool(val, cfg.setupHotspot)) bad("must be on or off");
         } else if (key == "ha_url" || key == "ha_url_away") {
             std::string v = val;
             while (!v.empty() && v.back() == '/') v.pop_back();
@@ -290,6 +292,7 @@ void addAiSection(std::string& t) {
     str("wifi_password_2", d.wifiPasswordN[0], "its password");
     str("wifi_name_3", d.wifiNameN[1], "optional: a third network, tried after the second");
     str("wifi_password_3", d.wifiPasswordN[1], "its password");
+    onoff("setup_hotspot", d.setupHotspot, "no network works for 2 min: open Wi-Fi \"Buddy Setup\" for the settings page");
     str("ha_url", d.haUrl, "Home Assistant's address at home, e.g. http://192.168.1.20:8123");
     str("ha_url_away", d.haUrlAway, "optional: its address from anywhere else, e.g. a Tailscale Funnel https://...ts.net");
     str("ha_token", d.haToken, "long-lived access token (from the Desk Buddy user)");

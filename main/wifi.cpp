@@ -24,6 +24,52 @@ static bool s_scanning = false;
 static bool s_wantScan = false;        // the next retry looks around first
 static esp_timer_handle_t s_retry = nullptr;
 
+// Setup hotspot: when no saved network has worked for a while (or none is
+// saved), Buddy opens his own open network so the settings page can still be
+// reached. Anything changed there still needs a tap on his screen.
+static constexpr const char* kSetupSsid = "Buddy Setup";
+static constexpr uint32_t kSetupAfterMs = 120000;
+static bool s_setupAllowed = true;
+static std::atomic<bool> s_apOn{false};
+static std::atomic<int> s_apClients{0};
+static uint32_t s_offlineSince = 0;       // when it last had no connection (ms)
+static esp_timer_handle_t s_watch = nullptr;
+
+static uint32_t nowMs() { return (uint32_t)(esp_timer_get_time() / 1000); }
+
+static void startSetupHotspot() {
+    wifi_config_t ap = {};
+    strncpy((char*)ap.ap.ssid, kSetupSsid, sizeof ap.ap.ssid);
+    ap.ap.ssid_len = strlen(kSetupSsid);
+    ap.ap.authmode = WIFI_AUTH_OPEN;
+    ap.ap.max_connection = 2;
+    ap.ap.channel = 1;
+    esp_wifi_set_mode(s_networks.empty() ? WIFI_MODE_AP : WIFI_MODE_APSTA);
+    if (esp_wifi_set_config(WIFI_IF_AP, &ap) == ESP_OK) {
+        s_apOn.store(true);
+        ESP_LOGW(TAG, "%s: started the setup hotspot \"%s\": join it and open http://192.168.71.1/ (%u KB internal RAM free)",
+                 s_networks.empty() ? "no Wi-Fi network saved" : "no saved network worked for 2 minutes", kSetupSsid,
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
+    }
+}
+
+static void stopSetupHotspot() {
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    s_apOn.store(false);
+    s_apClients.store(0);
+    ESP_LOGI(TAG, "connected again: setup hotspot off");
+}
+
+// Every few seconds: start the setup hotspot after a long time offline; turn
+// it off once connected again (unless someone is still using it).
+static void watch(void*) {
+    if (s_connected.load()) {
+        if (s_apOn.load() && s_apClients.load() == 0) stopSetupHotspot();
+        return;
+    }
+    if (!s_apOn.load() && s_setupAllowed && nowMs() - s_offlineSince > kSetupAfterMs) startSetupHotspot();
+}
+
 static void useNetwork(int i) {
     s_current.store(i);
     const auto& n = s_networks[i];
@@ -79,6 +125,12 @@ static void pickFromScan() {
 }
 
 static void retry(void*) {
+    // Someone is on the setup hotspot: hold off, since trying networks makes
+    // the radio hop channels and drops them.
+    if (s_apClients.load() > 0) {
+        esp_timer_start_once(s_retry, 30000 * 1000ull);
+        return;
+    }
     // A few quick retries on the same network, then look around again (it may
     // be out of range now, and another saved network in range).
     if (s_wantScan) startScan();
@@ -86,7 +138,13 @@ static void retry(void*) {
 }
 
 static void onEvent(void*, esp_event_base_t base, int32_t id, void* data) {
-    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+    if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STACONNECTED) {
+        ESP_LOGI(TAG, "someone joined the setup hotspot");
+        s_apClients.fetch_add(1);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STADISCONNECTED) {
+        if (s_apClients.fetch_sub(1) <= 0) s_apClients.store(0);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+        if (s_networks.empty()) return;
         s_status.store("connecting");
         startScan();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
@@ -94,6 +152,7 @@ static void onEvent(void*, esp_event_base_t base, int32_t id, void* data) {
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         const auto* d = (wifi_event_sta_disconnected_t*)data;
         const bool wasConnected = s_connected.exchange(false);
+        if (wasConnected) s_offlineSince = nowMs();
         s_onNet.store(-1);
         if (wasConnected) s_failures = 0;
         switch (d->reason) {
@@ -134,9 +193,10 @@ static void onEvent(void*, esp_event_base_t base, int32_t id, void* data) {
     }
 }
 
-bool wifiStart(const std::vector<std::pair<std::string, std::string>>& networks) {
-    if (networks.empty()) return false;
+bool wifiStart(const std::vector<std::pair<std::string, std::string>>& networks, bool setupHotspot) {
+    if (networks.empty() && !setupHotspot) return false;
     s_networks = networks;
+    s_setupAllowed = setupHotspot;
     ESP_LOGI(TAG, "starting (%u KB internal RAM free, %u saved network%s)",
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024), (unsigned)networks.size(),
              networks.size() == 1 ? "" : "s");
@@ -152,6 +212,18 @@ bool wifiStart(const std::vector<std::pair<std::string, std::string>>& networks)
     esp_timer_create(&targs, &s_retry);
     esp_netif_t* netif = esp_netif_create_default_wifi_sta();
     esp_netif_set_hostname(netif, "desk-buddy");
+    if (setupHotspot) {
+        // Its own address range: the default (192.168.4.x) can be the same as a
+        // home network's, which confuses routing while both are up.
+        esp_netif_t* ap = esp_netif_create_default_wifi_ap();
+        esp_netif_ip_info_t ip = {};
+        esp_netif_set_ip4_addr(&ip.ip, 192, 168, 71, 1);
+        esp_netif_set_ip4_addr(&ip.gw, 192, 168, 71, 1);
+        esp_netif_set_ip4_addr(&ip.netmask, 255, 255, 255, 0);
+        esp_netif_dhcps_stop(ap);
+        esp_netif_set_ip_info(ap, &ip);
+        esp_netif_dhcps_start(ap);
+    }
 
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     if ((err = esp_wifi_init(&init)) != ESP_OK) {
@@ -166,6 +238,7 @@ bool wifiStart(const std::vector<std::pair<std::string, std::string>>& networks)
 
     esp_wifi_set_storage(WIFI_STORAGE_RAM);  // settings.txt is the source of truth
     esp_wifi_set_mode(WIFI_MODE_STA);
+    if (networks.empty()) startSetupHotspot();  // nothing to join: straight to the setup hotspot
     if ((err = esp_wifi_start()) != ESP_OK) {
         ESP_LOGE(TAG, "start failed: %s", esp_err_to_name(err));
         s_status.store(err == ESP_ERR_NO_MEM ? "FAILED: out of memory" : "FAILED to start");
@@ -174,11 +247,18 @@ bool wifiStart(const std::vector<std::pair<std::string, std::string>>& networks)
     // Power saving adds up to a few hundred ms of delay per packet; answers
     // should come back as fast as possible.
     esp_wifi_set_ps(WIFI_PS_NONE);
+    s_offlineSince = nowMs();
+    if (setupHotspot) {
+        const esp_timer_create_args_t wargs = {.callback = watch, .arg = nullptr, .dispatch_method = ESP_TIMER_TASK,
+                                               .name = "wifi_watch", .skip_unhandled_events = true};
+        if (esp_timer_create(&wargs, &s_watch) == ESP_OK) esp_timer_start_periodic(s_watch, 5000 * 1000ull);
+    }
     s_started = true;
     return true;
 }
 
 bool wifiConnected() { return s_connected.load(); }
+bool wifiSetupHotspotOn() { return s_apOn.load(); }
 bool wifiConnectedOrStarting() { return s_started; }
 const char* wifiStatus() { return s_status.load(); }
 int wifiNetworkIndex() { return s_onNet.load(); }

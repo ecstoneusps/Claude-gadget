@@ -60,6 +60,7 @@ wifi_name_2                  =        # optional: another network if home isn't 
 wifi_password_2              =        # its password
 wifi_name_3                  =        # optional: a third network, tried after the second
 wifi_password_3              =        # its password
+setup_hotspot                = on     # no network works for 2 min: open Wi-Fi "Buddy Setup" for the settings page
 ha_url                       =        # Home Assistant's address at home, e.g. http://192.168.1.20:8123
 ha_url_away                  =        # optional: its address from anywhere else, e.g. a Tailscale Funnel https://...ts.net
 ha_token                     =        # long-lived access token (from the Desk Buddy user)
