@@ -75,6 +75,26 @@ Vision setup (once): on the PC run `ollama pull gemma3:4b`, then set
 `http://192.168.4.98:11434`) in settings.txt. Any Ollama vision model works
 (`vision_model`); gemma3:4b fits next to the chat model on a 12 GB card.
 
+**Seeing away from home** (with `ha_url_away`): Ollama has no password, so it
+must never be put on the internet. Instead, away from home Buddy sends the
+photo through his Home Assistant connection, and Home Assistant passes it to
+Ollama on the home network. Add this to Home Assistant's `configuration.yaml`
+(with Ollama's address), restart Home Assistant, and that's it:
+
+```yaml
+rest_command:
+  buddy_vision:
+    url: "http://192.168.4.98:11434/api/chat"   # Ollama on the PC (same as vision_url)
+    method: POST
+    content_type: "application/json"
+    timeout: 120
+    payload: >-
+      {"model": {{ model | tojson }}, "stream": false, "keep_alive": "10m",
+       "messages": {{ messages | tojson }}}
+```
+
+At home Buddy still talks to Ollama directly (a little faster).
+
 ## Voice commands
 
 Say **"Hey Buddy"**. The face switches to its listening look, and you then have
@@ -352,7 +372,7 @@ and restart the buddy.
 | `ha_url` | Home Assistant's address with its IP and port, e.g. `http://192.168.1.20:8123` (`.local` names don't work), used on the home network |
 | `wifi_name_2`, `wifi_password_2`, `wifi_name_3`, `wifi_password_3` | Optional extra networks, such as your phone's hotspot (set it to 2.4 GHz / "maximize compatibility"). Buddy joins the first network in the list that's in range, and looks again whenever the connection drops |
 | `setup_hotspot` | `on` (default): if no saved network works for 2 minutes, Buddy opens the `Buddy Setup` Wi-Fi so you can reach the settings page at http://192.168.71.1/ |
-| `ha_url_away` | Optional: Home Assistant's address from anywhere else, used on any network but the home one, e.g. a Tailscale Funnel address `https://homeassistant.your-tailnet.ts.net`. "What do you see?" only works at home, since the vision model has no password and must not be put on the internet |
+| `ha_url_away` | Optional: Home Assistant's address from anywhere else, used on any network but the home one, e.g. a Tailscale Funnel address `https://homeassistant.your-tailnet.ts.net`. "What do you see?" then goes through Home Assistant (see "Seeing away from home"), so Ollama itself never has to be on the internet |
 | `ha_token` | A long-lived access token for the Home Assistant user the buddy logs in as |
 | `ha_pipeline` | The voice assistant to use, by its name in Home Assistant (default `Buddy`) |
 | `conversation` | `off` uses only the built-in commands, even with the above filled in |

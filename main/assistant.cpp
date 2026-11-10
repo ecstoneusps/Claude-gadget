@@ -88,7 +88,7 @@ static std::string s_conversationId;
 static uint32_t s_conversationUntil = 0;
 static bool s_tokenRejected = false;
 
-enum class Stage { Idle, WaitRunStart, Streaming, WaitStt, WaitIntent };
+enum class Stage { Idle, WaitRunStart, Streaming, WaitStt, WaitIntent, WaitVision };
 static Stage s_stage = Stage::Idle;
 static int s_runId = 0;
 static int s_handlerId = -1;
@@ -115,13 +115,13 @@ static const char* jstr(const cJSON* obj, const char* key) {
     return cJSON_IsString(v) ? v->valuestring : nullptr;
 }
 
-static bool sendJson(cJSON* msg) {
+static bool sendJson(cJSON* msg, int timeoutMs = 3000) {
     char* text = cJSON_PrintUnformatted(msg);
     cJSON_Delete(msg);
     if (!text) return false;
     const int len = strlen(text);
     const bool connected = esp_websocket_client_is_connected(s_ws);
-    const int sent = connected ? esp_websocket_client_send_text(s_ws, text, len, pdMS_TO_TICKS(3000)) : -1;
+    const int sent = connected ? esp_websocket_client_send_text(s_ws, text, len, pdMS_TO_TICKS(timeoutMs)) : -1;
     cJSON_free(text);
     if (sent != len)
         ESP_LOGW(TAG, "send failed (%d of %d bytes%s)", sent, len, connected ? "" : ", not connected");
@@ -455,6 +455,7 @@ static bool speak(const std::string& text) {
 }
 
 static std::string askVision(const std::string& question);
+static void startVision(const std::string& question, bool micsWaiting);
 static void deliverReply(const std::string& reply, bool micsWaiting);
 
 // Remembers or forgets a note and says so (in Buddy's voice, with a face).
@@ -521,11 +522,6 @@ static void handleHeard(const std::string& text) {
     // Asking about what it sees: a fresh photo (the main loop takes it and
     // calls assistantLook). The microphones keep waiting meanwhile.
     if (!s_cfg.visionUrl.empty() && isVisionRequest(text)) {
-        if (awayFromHome()) {  // the vision model is on the home network only (it has no password)
-            ESP_LOGI(TAG, "-> asked to look, but away from home: no vision");
-            deliverReply("[sad] I can only see things when I'm at home.", true);
-            return;
-        }
         ESP_LOGI(TAG, "-> taking a look");
         finishTurn();
         s_turnActive.store(true);  // until the photo arrives
@@ -555,14 +551,7 @@ static void handleHeard(const std::string& text) {
         finishTurn();
         s_turnActive.store(true);
         post(AssistEvent::Thinking);
-        const std::string answer = askVision(text);
-        if (answer.empty()) {
-            s_turnActive.store(false);
-            post(AssistEvent::Error, "couldn't see");
-            voiceResume();
-        } else {
-            deliverReply(answer, true);
-        }
+        startVision(text, true);
         return;
     }
     s_visionImage.clear();  // moved on from the photo
@@ -625,12 +614,9 @@ static const char* kVisionPrompt =
 
 // Asks the vision model about the current photo (s_visionImage). Returns the
 // reply text, or "" (and logs why) if it failed.
-static std::string askVision(const std::string& question) {
-    cJSON* req = cJSON_CreateObject();
-    cJSON_AddStringToObject(req, "model", s_cfg.visionModel.c_str());
-    cJSON_AddBoolToObject(req, "stream", false);
-    cJSON_AddStringToObject(req, "keep_alive", "10m");
-    cJSON* msgs = cJSON_AddArrayToObject(req, "messages");
+// The chat for the vision model: instructions, the conversation about this
+// photo so far (the photo goes with the first question), and the new question.
+static void addVisionMessages(cJSON* msgs, const std::string& question) {
     auto add = [&](const char* role, const std::string& text, bool withImage) {
         cJSON* m = cJSON_CreateObject();
         cJSON_AddStringToObject(m, "role", role);
@@ -648,6 +634,22 @@ static std::string askVision(const std::string& question) {
         if (role == "user") first = false;
     }
     add("user", question, first);
+}
+
+static void rememberVisionAnswer(const std::string& question, const std::string& answer) {
+    if (answer.empty()) return;
+    s_visionChat.emplace_back("user", question);
+    s_visionChat.emplace_back("assistant", answer);
+    s_visionUntil = nowMs() + kVisionFollowUpMs;
+}
+
+// At home: straight to Ollama on the home network. Blocks until it answers.
+static std::string askVision(const std::string& question) {
+    cJSON* req = cJSON_CreateObject();
+    cJSON_AddStringToObject(req, "model", s_cfg.visionModel.c_str());
+    cJSON_AddBoolToObject(req, "stream", false);
+    cJSON_AddStringToObject(req, "keep_alive", "10m");
+    addVisionMessages(cJSON_AddArrayToObject(req, "messages"), question);
     char* body = cJSON_PrintUnformatted(req);
     cJSON_Delete(req);
     if (!body) return "";
@@ -692,12 +694,89 @@ static std::string askVision(const std::string& question) {
     std::string answer = content ? content : "";
     cJSON_Delete(j);
     ESP_LOGI(TAG, "vision model answered in %d ms", (int)((esp_timer_get_time() - t0) / 1000));
-    if (!answer.empty()) {
-        s_visionChat.emplace_back("user", question);
-        s_visionChat.emplace_back("assistant", answer);
-        s_visionUntil = nowMs() + kVisionFollowUpMs;
-    }
+    rememberVisionAnswer(question, answer);
     return answer;
+}
+
+// Away from home Ollama can't be reached (and must not be put on the
+// internet: it has no password), so the photo goes through Home Assistant:
+// its rest_command.buddy_vision passes the request to Ollama on the home
+// network and hands back the answer. The answer arrives as a websocket
+// result (handleVisionResult).
+static int s_visionReqId = 0;
+static std::string s_visionQuestion;
+static bool s_visionMicsWaiting = false;
+static int64_t s_visionT0 = 0;
+
+static void finishVision(const std::string& answer, bool micsWaiting) {
+    if (answer.empty()) {
+        s_turnActive.store(false);
+        post(AssistEvent::Error, "couldn't see");
+        if (micsWaiting) voiceResume();
+        return;
+    }
+    deliverReply(answer, micsWaiting);
+}
+
+static bool askVisionViaHomeAssistant(const std::string& question, bool micsWaiting) {
+    cJSON* m = cJSON_CreateObject();
+    s_visionReqId = s_nextId++;
+    cJSON_AddNumberToObject(m, "id", s_visionReqId);
+    cJSON_AddStringToObject(m, "type", "call_service");
+    cJSON_AddStringToObject(m, "domain", "rest_command");
+    cJSON_AddStringToObject(m, "service", "buddy_vision");
+    cJSON* data = cJSON_AddObjectToObject(m, "service_data");
+    cJSON_AddStringToObject(data, "model", s_cfg.visionModel.c_str());
+    addVisionMessages(cJSON_AddArrayToObject(data, "messages"), question);
+    cJSON_AddBoolToObject(m, "return_response", true);
+    if (!sendJson(m, 30000)) return false;  // ~30 KB with the photo, maybe over mobile data
+    s_visionQuestion = question;
+    s_visionMicsWaiting = micsWaiting;
+    s_visionT0 = esp_timer_get_time();
+    s_stage = Stage::WaitVision;
+    s_deadline = nowMs() + 130000;  // rest_command's own timeout is 120 s
+    return true;
+}
+
+static void handleVisionResult(const cJSON* j) {
+    s_stage = Stage::Idle;
+    const int id = s_visionReqId;
+    s_visionReqId = 0;
+    (void)id;
+    std::string answer;
+    if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j, "success"))) {
+        const char* msg = jstr(cJSON_GetObjectItemCaseSensitive(j, "error"), "message");
+        ESP_LOGW(TAG, "Home Assistant couldn't pass the photo on: %s%s", msg ? msg : "?",
+                 msg && strstr(msg, "not found") ? " (add rest_command.buddy_vision to configuration.yaml: see the README)" : "");
+    } else {
+        const cJSON* resp = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(j, "result"), "response");
+        const cJSON* status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+        const cJSON* content = cJSON_GetObjectItemCaseSensitive(resp, "content");
+        cJSON* parsed = nullptr;
+        if (cJSON_IsString(content)) content = parsed = cJSON_Parse(content->valuestring);  // not sent as JSON
+        const char* text = jstr(cJSON_GetObjectItemCaseSensitive(content, "message"), "content");
+        if (cJSON_IsNumber(status) && status->valueint != 200)
+            ESP_LOGW(TAG, "the vision model answered HTTP %d through Home Assistant", status->valueint);
+        else if (!text)
+            ESP_LOGW(TAG, "no answer from the vision model through Home Assistant (is Ollama running on the PC?)");
+        if (text) answer = text;
+        cJSON_Delete(parsed);
+    }
+    ESP_LOGI(TAG, "vision model answered through Home Assistant in %d ms",
+             (int)((esp_timer_get_time() - s_visionT0) / 1000));
+    rememberVisionAnswer(s_visionQuestion, answer);
+    finishVision(answer, s_visionMicsWaiting);
+}
+
+// Asks the vision model at home directly, or away through Home Assistant
+// (then the answer comes later, in handleVisionResult).
+static void startVision(const std::string& question, bool micsWaiting) {
+    if (awayFromHome()) {
+        ESP_LOGI(TAG, "away from home: asking the vision model through Home Assistant");
+        if (!askVisionViaHomeAssistant(question, micsWaiting)) finishVision("", micsWaiting);
+        return;
+    }
+    finishVision(askVision(question), micsWaiting);
 }
 
 static void handleLook() {
@@ -724,14 +803,8 @@ static void handleLook() {
     post(AssistEvent::Thinking);
     ESP_LOGI(TAG, "looking: \"%s\" (%u KB photo -> %s)", question.c_str(), (unsigned)(len / 1024),
              s_cfg.visionModel.c_str());
-    const std::string answer = s_visionImage.empty() ? "" : askVision(question);
-    if (answer.empty()) {
-        s_turnActive.store(false);
-        post(AssistEvent::Error, "couldn't see");
-        if (micsWaiting) voiceResume();
-        return;
-    }
-    deliverReply(answer, micsWaiting);
+    if (s_visionImage.empty()) finishVision("", micsWaiting);
+    else startVision(question, micsWaiting);
 }
 
 static void handleRunEvent(const cJSON* ev) {
@@ -862,7 +935,9 @@ static void handleMessage(const std::string& text) {
         s_status.store("token rejected");
     } else if (strcmp(type, "result") == 0) {
         const cJSON* ok = cJSON_GetObjectItemCaseSensitive(j, "success");
-        if (id == s_listId) {
+        if (id == s_visionReqId && s_visionReqId != 0 && s_stage == Stage::WaitVision) {
+            handleVisionResult(j);
+        } else if (id == s_listId) {
             if (cJSON_IsTrue(ok)) handlePipelines(cJSON_GetObjectItemCaseSensitive(j, "result"));
             else ESP_LOGE(TAG, "couldn't list voice assistants");
         } else if (id == s_runId && !cJSON_IsTrue(ok)) {
@@ -955,7 +1030,8 @@ static void assistantTask(void*) {
         if (s_stage == Stage::Idle && s_turnPending.exchange(false)) startSttRun();
         if (s_stage == Stage::Streaming) pumpAudio();
         if (s_stage != Stage::Idle && (int32_t)(nowMs() - s_deadline) > 0) {
-            failTurn(s_stage == Stage::WaitIntent ? "the AI took too long to answer"
+            failTurn(s_stage == Stage::WaitVision ? "the vision model took too long (through Home Assistant)"
+                     : s_stage == Stage::WaitIntent ? "the AI took too long to answer"
                      : s_stage == Stage::WaitStt  ? "speech-to-text took too long"
                                                   : "Home Assistant didn't respond");
         }
@@ -1013,7 +1089,7 @@ void assistantEndAudio(bool heardSpeech) {
 
 bool assistantSttDone() { return s_sttDone.load(); }
 
-bool assistantCanSee() { return !s_cfg.visionUrl.empty() && s_ready.load() && !awayFromHome(); }
+bool assistantCanSee() { return !s_cfg.visionUrl.empty() && s_ready.load(); }
 
 bool assistantSay(const std::string& text) {
     if (!s_inbox || !s_ready.load()) return false;
