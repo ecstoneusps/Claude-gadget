@@ -47,6 +47,7 @@
 #include "sound.h"
 #include "voice.h"
 #include "wifi.h"
+#include "webui.h"
 
 static const char* TAG = "main";
 
@@ -98,9 +99,18 @@ static std::atomic<bool> aiStarted{false};
 static std::atomic<bool> voiceOk{false};
 static bool audioOk = false, cameraOkFlag = false, proxOkFlag = false;
 
+static uint32_t s_restartAt = 0;  // accepted new settings from the web page: restart then
+
 static void handleTouch(uint32_t now) {
     if (M5.Touch.getCount() == 0) return;
     const auto t = M5.Touch.getDetail();
+    if (webuiWaiting(now)) {  // the settings page sent a change: a tap accepts it
+        if (t.wasClicked() && !s_restartAt) {
+            webuiAccept();
+            s_restartAt = now + 2000;  // time for the page to hear it was accepted
+        }
+        return;
+    }
     if (t.isHolding()) buddy.onHold(now);
     else if (t.wasClicked()) buddy.onTap(now);
 }
@@ -563,6 +573,56 @@ static void handleVolumeChange(uint32_t now) {
     }
 }
 
+// The settings page sent a change: ask for a tap on the screen to accept it.
+static void drawSettingsPrompt(uint32_t now) {
+    canvas.fillScreen(TFT_BLACK);
+    canvas.setTextDatum(middle_center);
+    canvas.setTextColor(TFT_WHITE);
+    canvas.setFont(&fonts::FreeSansBold12pt7b);
+    const int cx = canvas.width() / 2;
+    if (s_restartAt) {
+        canvas.drawString("Saved!", cx, 100);
+        canvas.setFont(&fonts::FreeSans9pt7b);
+        canvas.drawString("Restarting with the new settings...", cx, 140);
+    } else {
+        canvas.drawString("New settings from", cx, 70);
+        canvas.drawString("the settings page", cx, 100);
+        canvas.setTextColor(TFT_CYAN);
+        canvas.drawString("Tap to accept", cx, 150);
+        canvas.setTextColor(TFT_LIGHTGREY);
+        canvas.setFont(&fonts::FreeSans9pt7b);
+        canvas.drawString("(or wait a minute to cancel)", cx, 185);
+        (void)now;
+    }
+    canvas.pushSprite(0, 0);
+}
+
+// For 20 s after Wi-Fi first connects, the settings page's address shows at
+// the bottom of the screen. Returns true while it's showing (and one frame
+// after, to clear it).
+static bool drawAddress(uint32_t now) {
+    static uint32_t since = 0;
+    static int state = 0;  // 0 = not yet, 1 = showing, 2 = done
+    if (state == 2) return false;
+    if (state == 0) {
+        if (webuiAddress().empty()) return false;
+        since = now;
+        state = 1;
+        ESP_LOGI(TAG, "settings page: %s", webuiAddress().c_str());
+    }
+    if (now - since > 20000) {
+        state = 2;
+        return true;  // redraw once without it
+    }
+    const std::string addr = "Settings: " + webuiAddress();
+    canvas.setFont(&fonts::FreeSans9pt7b);
+    canvas.setTextDatum(bottom_center);
+    canvas.fillRect(0, canvas.height() - 26, canvas.width(), 26, TFT_BLACK);
+    canvas.setTextColor(TFT_LIGHTGREY);
+    canvas.drawString(addr.c_str(), canvas.width() / 2, canvas.height() - 5);
+    return true;
+}
+
 static void uiTask(void*) {
     const bool proxOk = config.proximity && proximityBegin();
     if (config.radar) radarBegin();
@@ -647,7 +707,14 @@ static void uiTask(void*) {
             face.update(now - lastFrame);
             lastFrame = now;
             ++frames;
-            if (runPhoto(now)) {
+            if (s_restartAt || webuiWaiting(now)) {
+                faceCanvas.invalidateAll();  // the settings prompt has the screen
+                drawSettingsPrompt(now);
+                if (s_restartAt && (int32_t)(now - s_restartAt) > 0) {
+                    ESP_LOGI(TAG, "restarting with the new settings");
+                    esp_restart();
+                }
+            } else if (runPhoto(now)) {
                 faceCanvas.invalidateAll();  // the camera has the screen
             } else if (config.cameraPreview) {
                 faceCanvas.invalidateAll();
@@ -656,6 +723,7 @@ static void uiTask(void*) {
                 const int64_t t0 = esp_timer_get_time();
                 faceCanvas.beginFrame();
                 face.draw(faceCanvas);
+                if (drawAddress(now)) faceCanvas.invalidateAll();
                 const DirtyCanvas::Rect r = faceCanvas.dirty();
                 const int64_t t1 = esp_timer_get_time();
                 if (!r.empty()) {
@@ -705,7 +773,7 @@ extern "C" void app_main(void) {
     assistEvents = xQueueCreate(8, sizeof(AssistEvent));
     // Wi-Fi first, while internal RAM is still in one piece: it needs a few
     // contiguous blocks that weren't left once the camera and models loaded.
-    if (config.aiConfigured()) wifiStart(config.wifiNetworks());
+    if (config.aiConfigured() && wifiStart(config.wifiNetworks())) webuiStart(kSettingsFile);
     sharedI2cBus();                       // before other tasks touch the I2C bus
     // The camera only runs if something uses it: it captures frames
     // continuously once started, even with nothing looking at them.

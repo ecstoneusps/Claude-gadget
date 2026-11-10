@@ -306,6 +306,20 @@ python3 tools/preview/make_preview.py   # face images + sound WAVs (needs g++ an
 
 ## Settings (microSD card)
 
+### Editing them from a browser
+
+Once Buddy is on Wi-Fi you don't need to take the card out. For 20 seconds
+after he connects, the bottom of his screen shows his settings page's address,
+e.g. `Settings: http://192.168.4.134/` (the log shows it too, and many routers
+also answer to `http://desk-buddy/`). Open it on a phone or PC on the same
+network to edit `settings.txt`, then press **Save** and **tap Buddy's screen
+within a minute** to accept. He saves the file and restarts with the new
+settings. Nothing changes without that tap, so nobody else on the network can
+change him unnoticed. Wi-Fi passwords and the Home Assistant token show as
+`********` and are never sent to the browser: leave them like that to keep
+them, or type a new one over them. The page lists any lines with mistakes
+(those are ignored, as usual).
+
 Put a FAT32-formatted microSD card in the slot on the side. On its first start
 with the card, the buddy writes a commented **`settings.txt`** to it (the same
 file as [`sdcard/settings.txt`](sdcard/settings.txt) in this repo, which you can
