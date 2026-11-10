@@ -43,3 +43,14 @@ public:
 private:
     std::vector<std::string> notes_;
 };
+
+// Learning from conversations: after a chat, the AI is asked (with
+// learnPrompt) which lasting facts are worth keeping, and its answer is turned
+// into notes by parseLearnedFacts. `transcript`: (who, what was said) pairs,
+// who = "owner" or "buddy". `notes`: what's already remembered.
+std::string learnPrompt(const std::vector<std::pair<std::string, std::string>>& transcript,
+                        const std::vector<std::string>& notes);
+// One fact per line; list markers, quotes and emotion tags are removed, and
+// anything that isn't a fact about the owner ("NONE", "Here's what I
+// learned:", questions, very short or very long lines) is left out.
+std::vector<std::string> parseLearnedFacts(const std::string& reply);

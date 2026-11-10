@@ -89,3 +89,8 @@ size_t memoryCount() {
     std::lock_guard<std::mutex> g(s_lock);
     return s_store.notes().size();
 }
+
+std::vector<std::string> memoryNotes() {
+    std::lock_guard<std::mutex> g(s_lock);
+    return s_store.notes();
+}

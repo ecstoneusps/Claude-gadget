@@ -38,6 +38,30 @@ Fill in `wifi_name`, `wifi_password`, `ha_url` and `ha_token` in `settings.txt`
 (see [Settings](#settings-microsd-card)). Keep the card private: the token works
 like a password for the Home Assistant user it belongs to.
 
+### Speaking sooner
+
+Buddy starts saying each sentence as soon as the AI has written it, instead of
+waiting for the whole answer (the AI's reply arrives bit by bit; each complete
+sentence is turned into speech while the next is still being written). Short
+answers sound the same; long ones start much sooner. Nothing to set up.
+
+### A more natural voice (Kokoro)
+
+Piper's voice is clear but flat. [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M)
+is a small, free, local voice model that sounds much more human and runs fine
+on a PC's CPU (no GPU needed). Run it with Docker on the PC that runs Ollama:
+
+```
+docker run -d --name kokoro --restart unless-stopped -p 10210:10210 ghcr.io/relvacode/kokoro-wyoming:latest
+```
+
+Then in Home Assistant: **Settings → Devices & services → Add integration →
+Wyoming Protocol**, the PC's address and port **10210**. Then **Settings →
+Voice assistants → Buddy**, set **Text-to-speech** to **Kokoro** and pick a
+voice (try `af_heart` or `am_michael`; the list is in the
+[voices documentation](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md)).
+Buddy uses whatever voice the assistant is set to, no change on his side.
+
 ## Remembering things
 
 Tell him something to keep: **"Remember that my dog's name is King"**, "don't
@@ -50,10 +74,14 @@ dog's name?" gets "King!" (the vision model sees them too).
 - **"Forget that"** removes the last note; **"forget that my dog's name is
   King"** removes that one; **"forget everything"** clears them all (the old
   list is kept as `memories-backup.txt`).
-- `memories.txt` is plain text, one note per line: read, edit or delete notes
-  on your computer. Lines starting with `#` are ignored.
-- Only things you ask him to remember are saved. `memory = off` in
-  settings.txt turns it off.
+- **He also learns by himself.** About a minute and a half after a chat goes
+  quiet, the AI looks it over and adds lasting facts it heard (names,
+  birthdays, likes, plans) to his notes; the log shows `learned: "..."`.
+  `learn = off` turns that off.
+- `memories.txt` is plain text, one note per line. Read, fix or delete notes on
+  the **settings page** ("Things Buddy remembers", accepted with a tap on his
+  screen) or on your computer. Lines starting with `#` are ignored.
+- `memory = off` in settings.txt turns notes off altogether.
 
 ## Taking pictures and seeing
 

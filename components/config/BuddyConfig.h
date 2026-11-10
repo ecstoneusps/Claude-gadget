@@ -64,6 +64,7 @@ struct BuddyConfig {
     bool conversation = true;        // off: only the built-in commands, even with Wi-Fi set up
     bool followUp = true;            // keep listening after an answer, without "Hey Buddy"
     bool memory = true;              // "remember that ...": notes in memories.txt, given to the AI
+    bool learn = true;               // after a chat, the AI adds lasting facts it heard to memories.txt
     int welcomeBackMinutes = 20;     // say hello out loud when you come back after this long away (0 = off)
 
     // "What do you see?": photos go straight to a vision model in Ollama

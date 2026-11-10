@@ -344,6 +344,7 @@ static void voiceInitTask(void*) {
         ac.visionUrl = config.visionUrl;
         ac.visionModel = config.visionModel;
         ac.memory = config.memory;
+        ac.learn = config.learn;
         aiStarted.store(assistantStart(ac, assistEvents));
     }
     vTaskDelete(nullptr);
@@ -583,9 +584,9 @@ static void drawSettingsPrompt(uint32_t now) {
     if (s_restartAt) {
         canvas.drawString("Saved!", cx, 100);
         canvas.setFont(&fonts::FreeSans9pt7b);
-        canvas.drawString("Restarting with the new settings...", cx, 140);
+        canvas.drawString("Restarting with the changes...", cx, 140);
     } else {
-        canvas.drawString("New settings from", cx, 70);
+        canvas.drawString("Changes from", cx, 70);
         canvas.drawString("the settings page", cx, 100);
         canvas.setTextColor(TFT_CYAN);
         canvas.drawString("Tap to accept", cx, 150);

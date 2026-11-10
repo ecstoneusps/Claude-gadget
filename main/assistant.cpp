@@ -21,6 +21,7 @@
 #include "audio_io.h"
 #include "cpustats.h"
 #include "memory.h"
+#include <algorithm>
 #include "Memory.h"
 #include "sound.h"
 #include "voice.h"
@@ -85,7 +86,21 @@ static int s_nextId = 1;
 static int s_listId = 0;
 static std::string s_pipelineId, s_ttsEngine, s_ttsLanguage, s_ttsVoice;
 static std::string s_conversationId;
+// While the AI writes its answer (intent-progress events), complete sentences
+// are spoken right away. The first one also sets the face (its emotion tag).
+static std::string s_streamText;
+static size_t s_streamUsed = 0;
+static bool s_streamStarted = false;
+static void resetStream();
+static uint32_t sayEnd();
 static uint32_t s_conversationUntil = 0;
+// Learning: what was said in the current chat, looked over for lasting facts
+// a while after it goes quiet.
+static std::vector<std::pair<std::string, std::string>> s_chatLog;
+static uint32_t s_lastChatMs = 0;
+static int s_learnId = 0;
+static std::string s_convEngine;  // the voice assistant's conversation agent
+static constexpr uint32_t kLearnAfterMs = 90000;
 static bool s_tokenRejected = false;
 
 enum class Stage { Idle, WaitRunStart, Streaming, WaitStt, WaitIntent, WaitVision };
@@ -201,6 +216,10 @@ static void endTurnAndResume() {
 
 static void failTurn(const char* what) {
     ESP_LOGW(TAG, "%s", what);
+    if (s_streamStarted) {  // stop after what's already being said
+        resetStream();
+        sayEnd();
+    }
     post(AssistEvent::Error, what);
     endTurnAndResume();
 }
@@ -226,6 +245,8 @@ static void startSttRun() {
 static bool s_notesChanged = false;
 
 static void startIntentRun(const std::string& said) {
+    if (s_chatLog.size() < 40) s_chatLog.emplace_back("owner", said);
+    s_lastChatMs = nowMs();
     const bool newConversation = s_conversationId.empty() || (int32_t)(s_conversationUntil - nowMs()) <= 0;
     std::string text = said;
     if (s_cfg.memory && (newConversation || s_notesChanged)) {
@@ -245,6 +266,7 @@ static void startIntentRun(const std::string& said) {
         cJSON_AddStringToObject(m, "conversation_id", s_conversationId.c_str());
     s_stage = Stage::WaitIntent;
     s_deadline = nowMs() + kIntentMs;
+    resetStream();
     if (!sendJson(m)) failTurn("couldn't send to Home Assistant");
 }
 
@@ -273,7 +295,27 @@ static void pumpAudio() {
 }
 
 // Downloads the reply as 16 kHz mono WAV and starts playing it. Returns false on failure.
-static bool speak(const std::string& text) {
+// Speaking happens a sentence at a time, in the speaker task: the assistant
+// task queues each sentence as soon as the AI has written it (or, for a reply
+// that arrives all at once, splits it up), so speech starts while the rest is
+// still being written and turned into sound. nullptr ends a reply.
+struct SayItem {
+    std::string* text;  // nullptr: end of this reply
+    uint32_t gen;
+};
+static QueueHandle_t s_sayQ = nullptr;
+static std::atomic<uint32_t> s_sayGen{0};      // replies queued
+static std::atomic<uint32_t> s_sayDoneGen{0};  // replies finished by the speaker task
+static std::atomic<bool> s_sayAudio{false};    // some of the current reply was actually heard
+// Another sentence of this reply is waiting (not just the end of the reply).
+static bool moreToSay() {
+    SayItem next;
+    return s_sayQ && xQueuePeek(s_sayQ, &next, 0) == pdTRUE && next.text != nullptr;
+}
+
+// Fetches one sentence's speech from Home Assistant and plays it as it
+// arrives. `begun`: the speech stream to the speaker is already open.
+static bool speakPiece(const std::string& text, bool* begun) {
     static CpuWindow cpu;
     cpu.mark();
     const int64_t t0 = esp_timer_get_time();
@@ -420,13 +462,24 @@ static bool speak(const std::string& text) {
                 break;
             }
             streaming = true;
-            soundSpeechBegin();
+            if (!*begun) {
+                soundSpeechBegin();
+                *begun = true;
+            }
             play(head.data() + info.dataOffset, head.size() - info.dataOffset);
             std::vector<uint8_t>().swap(head);
         } else if (n == 0) {
             break;  // Home Assistant marked the end
         } else if (n == -ESP_ERR_HTTP_EAGAIN) {
             quietMs += kPollMs;
+            // Home Assistant can be slow to mark the end. With another
+            // sentence waiting, a short pause means this one is done (its
+            // sound is still playing from the buffer meanwhile); after the last
+            // sentence, wait until it has played and nothing came for 2 s.
+            if (streaming && moreToSay() && quietMs >= 500) {
+                ending = "next sentence waiting";
+                break;
+            }
             if (streaming && quietMs >= kQuietEndMs && soundSpeechQueued() == 0) {
                 ending = "nothing new for 2 s";
                 break;
@@ -441,7 +494,6 @@ static bool speak(const std::string& text) {
         }
     }
     esp_http_client_cleanup(http);
-    if (streaming) soundSpeechEnd();
     tDone = esp_timer_get_time();
     if (!streaming) {
         if (ok) ESP_LOGW(TAG, "no speech audio received");
@@ -452,6 +504,65 @@ static bool speak(const std::string& text) {
              (int)((tDone - tFirst) / 1000), (unsigned)(total / 1024), ending);
     cpu.log("cpu while fetching the reply");
     return true;
+}
+
+static void speakerTask(void*) {
+    bool begun = false;
+    while (true) {
+        SayItem item;
+        if (xQueueReceive(s_sayQ, &item, portMAX_DELAY) != pdTRUE) continue;
+        if (!item.text) {  // end of a reply
+            if (begun) soundSpeechEnd();
+            begun = false;
+            s_sayDoneGen.store(item.gen);
+            continue;
+        }
+        if (s_ready.load() && speakPiece(*item.text, &begun)) s_sayAudio.store(true);
+        delete item.text;
+    }
+}
+
+static void sayPiece(const std::string& speech) {
+    size_t a = speech.find_first_not_of(" \n"), b = speech.find_last_not_of(" \n");
+    if (a == std::string::npos) return;
+    SayItem item{new std::string(speech.substr(a, b - a + 1)), 0};
+    if (xQueueSend(s_sayQ, &item, pdMS_TO_TICKS(2000)) != pdTRUE) delete item.text;
+}
+
+static uint32_t sayEnd() {
+    const uint32_t gen = ++s_sayGen;
+    SayItem item{nullptr, gen};
+    xQueueSend(s_sayQ, &item, portMAX_DELAY);
+    return gen;
+}
+
+static void resetStream() {
+    s_streamText.clear();
+    s_streamUsed = 0;
+    s_streamStarted = false;
+}
+
+static void streamText(const char* delta) {
+    s_streamText += delta;
+    if (!s_streamStarted) {
+        // A reasoning model's <think> block isn't spoken: wait until it's over.
+        const size_t first = s_streamText.find_first_not_of(" \n");
+        if (first != std::string::npos && s_streamText.compare(first, 7, "<think>") == 0) {
+            const size_t close = s_streamText.find("</think>");
+            if (close == std::string::npos) return;
+            if (s_streamUsed < close + 8) s_streamUsed = close + 8;
+        }
+    }
+    for (size_t end; (end = sentenceEnd(s_streamText, s_streamUsed)) != std::string::npos; s_streamUsed = end) {
+        const ReplyParts piece = splitReply(s_streamText.substr(s_streamUsed, end - s_streamUsed));
+        if (!s_streamStarted) {
+            s_streamStarted = true;
+            s_sayAudio.store(false);
+            ESP_LOGI(TAG, "speaking while the AI is still writing [%s]", piece.emotion.c_str());
+            post(AssistEvent::Reply, "", piece.emotion.c_str());
+        }
+        sayPiece(piece.speech);
+    }
 }
 
 static std::string askVision(const std::string& question);
@@ -568,17 +679,30 @@ static void deliverReply(const std::string& reply, bool micsWaiting) {
     finishTurn();
     s_turnActive.store(true);  // still busy until it has spoken
 
-    post(AssistEvent::Reply, "", parts.emotion.c_str());
-    bool spoke = false;
-    if (!parts.speech.empty()) {
-        spoke = s_ready.load() && speak(parts.speech);
-        if (!spoke) post(AssistEvent::Error, "couldn't get the spoken reply");
+    const bool streamed = s_streamStarted;
+    if (streamed) {
+        // The part after the sentences already being spoken.
+        sayPiece(splitReply(s_streamText.substr(s_streamUsed)).speech);
+    } else {
+        s_sayAudio.store(false);
+        post(AssistEvent::Reply, "", parts.emotion.c_str());
+        // A sentence at a time here too: the first one starts sooner.
+        size_t used = 0;
+        for (size_t end; (end = sentenceEnd(parts.speech, used)) != std::string::npos; used = end)
+            sayPiece(parts.speech.substr(used, end - used));
+        sayPiece(parts.speech.substr(used));
     }
+    resetStream();
+    const bool anything = streamed || !parts.speech.empty();
+    const uint32_t gen = sayEnd();
+    for (int waited = 0; s_sayDoneGen.load() != gen && waited < 180000; waited += 20) vTaskDelay(pdMS_TO_TICKS(20));
+    const bool spoke = s_sayAudio.load();
+    if (anything && !spoke) post(AssistEvent::Error, "couldn't get the spoken reply");
     if (spoke) {
         while (soundSpeaking()) vTaskDelay(pdMS_TO_TICKS(20));
         vTaskDelay(pdMS_TO_TICKS(250));  // let the speaker's echo die away before listening
     }
-    if (spoke || parts.speech.empty()) post(AssistEvent::Done);  // (a failure already showed confusion)
+    if (spoke || !anything) post(AssistEvent::Done);  // (a failure already showed confusion)
     s_turnActive.store(false);
     if (!micsWaiting) return;
     if (spoke && s_cfg.followUp && s_ready.load() && assistantBeginTurn(true)) {
@@ -598,6 +722,8 @@ static void handleReply(const cJSON* intentOutput) {
         s_conversationId = cid;
         s_conversationUntil = nowMs() + kConversationMs;
     }
+    if (said && s_chatLog.size() < 40) s_chatLog.emplace_back("buddy", splitReply(said).speech);
+    s_lastChatMs = nowMs();
     deliverReply(said ? said : "", true);
 }
 
@@ -830,6 +956,10 @@ static void handleRunEvent(const cJSON* ev) {
         const char* text = jstr(out, "text");
         s_accepting.store(false);
         handleHeard(text ? text : "");
+    } else if (strcmp(type, "intent-progress") == 0) {
+        const cJSON* delta = cJSON_GetObjectItemCaseSensitive(data, "chat_log_delta");
+        const char* piece = jstr(delta, "content");
+        if (piece && s_stage == Stage::WaitIntent) streamText(piece);
     } else if (strcmp(type, "intent-end") == 0) {
         handleReply(cJSON_GetObjectItemCaseSensitive(data, "intent_output"));
     } else if (strcmp(type, "error") == 0) {
@@ -877,6 +1007,7 @@ static void handlePipelines(const cJSON* result) {
     auto get = [&](const char* key) { const char* v = jstr(chosen, key); return std::string(v ? v : ""); };
     s_pipelineId = get("id");
     s_ttsEngine = get("tts_engine");
+    s_convEngine = get("conversation_engine");
     s_ttsLanguage = get("tts_language");
     s_ttsVoice = get("tts_voice");
     ESP_LOGI(TAG, "using voice assistant \"%s\": speech-to-text %s, conversation %s, text-to-speech %s (%s)",
@@ -900,6 +1031,47 @@ static void sendAuth() {
     cJSON_AddStringToObject(m, "access_token", s_cfg.token.c_str());
     s_authSent = sendJson(m);
     if (s_authSent) ESP_LOGI(TAG, "token sent; waiting for the answer");
+}
+
+// A while after a chat goes quiet, the AI looks it over for lasting facts
+// (names, likes, plans...) and they're added to the notes. Same AI, its own
+// one-off conversation; the answer arrives as a result (handleLearnResult).
+static void startLearning() {
+    std::vector<std::pair<std::string, std::string>> log;
+    log.swap(s_chatLog);
+    size_t ownerWords = 0;
+    for (const auto& [who, said] : log)
+        if (who == "owner") ownerWords += std::count(said.begin(), said.end(), ' ') + 1;
+    if (ownerWords < 4 || s_convEngine.empty()) return;  // nothing much was said
+    cJSON* m = cJSON_CreateObject();
+    s_learnId = s_nextId++;
+    cJSON_AddNumberToObject(m, "id", s_learnId);
+    cJSON_AddStringToObject(m, "type", "conversation/process");
+    cJSON_AddStringToObject(m, "text", learnPrompt(log, memoryNotes()).c_str());
+    cJSON_AddStringToObject(m, "agent_id", s_convEngine.c_str());
+    ESP_LOGI(TAG, "looking over the last chat for things to remember (%u lines)", (unsigned)log.size());
+    if (!sendJson(m)) s_learnId = 0;
+}
+
+static void handleLearnResult(const cJSON* j) {
+    s_learnId = 0;
+    if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j, "success"))) {
+        const char* msg = jstr(cJSON_GetObjectItemCaseSensitive(j, "error"), "message");
+        ESP_LOGW(TAG, "couldn't look over the chat: %s", msg ? msg : "?");
+        return;
+    }
+    const cJSON* resp = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(j, "result"), "response");
+    const cJSON* plain = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(resp, "speech"), "plain");
+    const char* text = jstr(plain, "speech");
+    int added = 0;
+    for (const auto& fact : parseLearnedFacts(text ? text : "")) {
+        if (memoryRemember(fact) == MemoryResult::Added) {
+            ESP_LOGI(TAG, "learned: \"%s\"", fact.c_str());
+            ++added;
+        }
+    }
+    if (added) s_notesChanged = true;
+    else ESP_LOGI(TAG, "nothing new to remember from that chat");
 }
 
 static void handleMessage(const std::string& text) {
@@ -937,6 +1109,8 @@ static void handleMessage(const std::string& text) {
         const cJSON* ok = cJSON_GetObjectItemCaseSensitive(j, "success");
         if (id == s_visionReqId && s_visionReqId != 0 && s_stage == Stage::WaitVision) {
             handleVisionResult(j);
+        } else if (id == s_learnId && s_learnId != 0) {
+            handleLearnResult(j);
         } else if (id == s_listId) {
             if (cJSON_IsTrue(ok)) handlePipelines(cJSON_GetObjectItemCaseSensitive(j, "result"));
             else ESP_LOGE(TAG, "couldn't list voice assistants");
@@ -1028,6 +1202,9 @@ static void assistantTask(void*) {
         }
 
         if (s_stage == Stage::Idle && s_turnPending.exchange(false)) startSttRun();
+        if (s_cfg.learn && s_cfg.memory && !s_chatLog.empty() && s_learnId == 0 && s_stage == Stage::Idle &&
+            !s_turnActive.load() && s_ready.load() && nowMs() - s_lastChatMs > kLearnAfterMs)
+            startLearning();
         if (s_stage == Stage::Streaming) pumpAudio();
         if (s_stage != Stage::Idle && (int32_t)(nowMs() - s_deadline) > 0) {
             failTurn(s_stage == Stage::WaitVision ? "the vision model took too long (through Home Assistant)"
@@ -1052,6 +1229,12 @@ bool assistantStart(const AssistantConfig& cfg, QueueHandle_t events) {
     // Stack in PSRAM: internal RAM is scarce, and this task never touches flash.
     // Priority 5, above the UI (4): otherwise fetching a reply only ran in the
     // UI's short pauses, which made replies slow and starved the idle task.
+    s_sayQ = xQueueCreate(32, sizeof(SayItem));
+    if (!s_sayQ || xTaskCreatePinnedToCoreWithCaps(speakerTask, "speaker", 8192, nullptr, 5, nullptr, 1,
+                                                   MALLOC_CAP_SPIRAM) != pdPASS) {
+        ESP_LOGE(TAG, "out of memory starting the speaker");
+        return false;
+    }
     if (xTaskCreatePinnedToCoreWithCaps(assistantTask, "assistant", 8192, nullptr, 5, &s_task, 1,
                                         MALLOC_CAP_SPIRAM) != pdPASS) {
         ESP_LOGE(TAG, "out of memory starting the assistant");

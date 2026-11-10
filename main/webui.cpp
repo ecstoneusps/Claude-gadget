@@ -1,6 +1,7 @@
 #include "webui.h"
 
 #include <mutex>
+#include <utility>
 #include <string.h>
 
 #include "BuddyConfig.h"
@@ -8,6 +9,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
+#include "memory.h"
 #include "sdcard.h"
 #include "wifi.h"
 
@@ -19,6 +21,8 @@ static constexpr size_t kMaxBody = 32 * 1024;
 static const char* s_file = "settings.txt";
 static std::mutex s_lock;
 static std::string s_pending;       // accepted text waits here for the tap
+static const char* s_pendingFile = nullptr;  // which file it's for
+static constexpr const char* kMemoriesFile = "memories.txt";
 static uint32_t s_pendingSince = 0;
 static bool s_hasPending = false;
 static const char* s_result = "none";  // what became of the last change: none/waiting/accepted/declined
@@ -148,30 +152,40 @@ button:disabled{opacity:.5}
 <p>This is <code>settings.txt</code> from Buddy's SD card. Passwords and the token show as ********: leave them like that to keep them.
 After saving, <b>tap Buddy's screen</b> within a minute to accept; he then restarts with the new settings.</p>
 <textarea id="t" spellcheck="false" autocomplete="off">Loading...</textarea>
-<button id="save" disabled>Save</button>
+<button id="save" disabled>Save settings</button>
 <div id="msg"></div>
+<h1 style="margin-top:1.4em">Things Buddy remembers</h1>
+<p>His notes (<code>memories.txt</code>): one per line, written the way you'd say it ("My dog's name is King").
+Some he was told ("remember that..."), some he picked up from your chats. Fix or delete anything here, then save and tap his screen.</p>
+<textarea id="n" spellcheck="true" style="height:35vh">Loading...</textarea>
+<button id="saveN" disabled>Save notes</button>
+<div id="msgN"></div>
 <script>
-const t=document.getElementById('t'),save=document.getElementById('save'),msg=document.getElementById('msg');
-function show(text,cls){msg.textContent=text;msg.className=cls||'';}
-fetch('/settings').then(r=>r.ok?r.text():Promise.reject(r.status)).then(x=>{t.value=x;save.disabled=false;})
- .catch(e=>show('Could not load the settings ('+e+').','warn'));
-save.onclick=async()=>{
- save.disabled=true;show('Sending...');
- try{
-  const r=await fetch('/settings',{method:'POST',body:t.value});const j=await r.json();
-  if(!r.ok){show(j.error||'Not saved.','warn');save.disabled=false;return;}
-  let s='Now tap Buddy\'s screen to accept the new settings (within a minute).';
-  if(j.warnings.length)s+='\n\nProblems found (those lines will be ignored):\n- '+j.warnings.join('\n- ');
-  show(s,j.warnings.length?'warn':'');
-  for(let i=0;i<70;i++){
-   await new Promise(ok=>setTimeout(ok,1000));
-   const st=await (await fetch('/status')).json();
-   if(st.state==='accepted'){show('Accepted. Buddy is restarting with the new settings.','ok');return;}
-   if(st.state==='declined'){show('Not accepted (nobody tapped the screen in time). Nothing was changed.','warn');save.disabled=false;return;}
-  }
- }catch(e){show('Lost contact with Buddy. If he accepted, he is restarting; reload this page in a moment.','warn');}
- save.disabled=false;
-};
+function editor(path,box,btn,out,what){
+ const t=document.getElementById(box),save=document.getElementById(btn),msg=document.getElementById(out);
+ function show(text,cls){msg.textContent=text;msg.className=cls||'';}
+ fetch(path).then(r=>r.ok?r.text():Promise.reject(r.status)).then(x=>{t.value=x;save.disabled=false;})
+  .catch(e=>show('Could not load '+what+' ('+e+').','warn'));
+ save.onclick=async()=>{
+  save.disabled=true;show('Sending...');
+  try{
+   const r=await fetch(path,{method:'POST',body:t.value});const j=await r.json();
+   if(!r.ok){show(j.error||'Not saved.','warn');save.disabled=false;return;}
+   let s='Now tap Buddy\'s screen to accept the new '+what+' (within a minute).';
+   if(j.warnings.length)s+='\n\nProblems found (those lines will be ignored):\n- '+j.warnings.join('\n- ');
+   show(s,j.warnings.length?'warn':'');
+   for(let i=0;i<70;i++){
+    await new Promise(ok=>setTimeout(ok,1000));
+    const st=await (await fetch('/status')).json();
+    if(st.state==='accepted'){show('Accepted. Buddy is restarting with the new '+what+'.','ok');return;}
+    if(st.state==='declined'){show('Not accepted (nobody tapped the screen in time). Nothing was changed.','warn');save.disabled=false;return;}
+   }
+  }catch(e){show('Lost contact with Buddy. If he accepted, he is restarting; reload this page in a moment.','warn');}
+  save.disabled=false;
+ };
+}
+editor('/settings','t','save','msg','settings');
+editor('/memories','n','saveN','msgN','notes');
 </script></main></body></html>)HTML";
 
 static esp_err_t getPage(httpd_req_t* req) {
@@ -192,6 +206,14 @@ static esp_err_t getSettings(httpd_req_t* req) {
     return httpd_resp_send(req, out.data(), out.size());
 }
 
+static esp_err_t getMemories(httpd_req_t* req) {
+    std::string text;
+    sdcardReadFile(kMemoriesFile, text);  // none yet is fine: an empty list
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_send(req, text.data(), text.size());
+}
+
 static esp_err_t sendJson(httpd_req_t* req, const char* status, const std::string& json) {
     httpd_resp_set_status(req, status);
     httpd_resp_set_type(req, "application/json");
@@ -199,17 +221,42 @@ static esp_err_t sendJson(httpd_req_t* req, const char* status, const std::strin
     return httpd_resp_send(req, json.data(), json.size());
 }
 
-static esp_err_t postSettings(httpd_req_t* req) {
-    if (req->content_len == 0 || req->content_len > kMaxBody)
-        return sendJson(req, "400 Bad Request", "{\"error\":\"That's empty or too big.\"}");
-    std::string body(req->content_len, '\0');
+static bool readBody(httpd_req_t* req, std::string& body) {
+    body.assign(req->content_len, '\0');
     size_t got = 0;
     while (got < body.size()) {
         const int n = httpd_req_recv(req, &body[got], body.size() - got);
         if (n == HTTPD_SOCK_ERR_TIMEOUT) continue;
-        if (n <= 0) return ESP_FAIL;
+        if (n <= 0) return false;
         got += n;
     }
+    return true;
+}
+
+static void setPending(const char* file, std::string text) {
+    std::lock_guard<std::mutex> g(s_lock);
+    s_pending = std::move(text);
+    s_pendingFile = file;
+    s_pendingSince = nowMs();
+    s_hasPending = true;
+    s_result = "waiting";
+}
+
+static esp_err_t postMemories(httpd_req_t* req) {
+    if (req->content_len > kMaxBody) return sendJson(req, "400 Bad Request", "{\"error\":\"That's too big.\"}");
+    std::string body;
+    if (req->content_len > 0 && !readBody(req, body)) return ESP_FAIL;
+    if (!body.empty() && body.back() != '\n') body += '\n';
+    setPending(kMemoriesFile, body);
+    ESP_LOGI(TAG, "new notes from the web page (%u bytes); waiting for a tap on the screen", (unsigned)body.size());
+    return sendJson(req, "200 OK", "{\"warnings\":[]}");
+}
+
+static esp_err_t postSettings(httpd_req_t* req) {
+    if (req->content_len == 0 || req->content_len > kMaxBody)
+        return sendJson(req, "400 Bad Request", "{\"error\":\"That's empty or too big.\"}");
+    std::string body;
+    if (!readBody(req, body)) return ESP_FAIL;
     std::string current;
     sdcardReadFile(s_file, current);
     std::string text = unmasked(body, current);
@@ -217,13 +264,7 @@ static esp_err_t postSettings(httpd_req_t* req) {
     BuddyConfig cfg;
     std::vector<std::string> warnings;
     parseConfig(text, cfg, warnings);
-    {
-        std::lock_guard<std::mutex> g(s_lock);
-        s_pending = text;
-        s_pendingSince = nowMs();
-        s_hasPending = true;
-        s_result = "waiting";
-    }
+    setPending(s_file, text);
     ESP_LOGI(TAG, "new settings from the web page (%u bytes, %u problem%s); waiting for a tap on the screen",
              (unsigned)text.size(), (unsigned)warnings.size(), warnings.size() == 1 ? "" : "s");
     std::string json = "{\"warnings\":[";
@@ -258,6 +299,8 @@ void webuiStart(const char* settingsFile) {
         {.uri = "/settings", .method = HTTP_GET, .handler = getSettings, .user_ctx = nullptr},
         {.uri = "/settings", .method = HTTP_POST, .handler = postSettings, .user_ctx = nullptr},
         {.uri = "/status", .method = HTTP_GET, .handler = getStatus, .user_ctx = nullptr},
+        {.uri = "/memories", .method = HTTP_GET, .handler = getMemories, .user_ctx = nullptr},
+        {.uri = "/memories", .method = HTTP_POST, .handler = postMemories, .user_ctx = nullptr},
     };
     for (const auto& u : uris) httpd_register_uri_handler(server, &u);
     ESP_LOGI(TAG, "settings page ready (opens once Wi-Fi is connected)");
@@ -278,14 +321,17 @@ bool webuiWaiting(uint32_t now) {
 
 void webuiAccept() {
     std::string text;
+    const char* file;
     {
         std::lock_guard<std::mutex> g(s_lock);
         if (!s_hasPending) return;
         text.swap(s_pending);
+        file = s_pendingFile ? s_pendingFile : s_file;
         s_hasPending = false;
     }
-    const bool ok = sdcardWriteFile(s_file, text);
-    ESP_LOGI(TAG, "new settings %s", ok ? "accepted and saved" : "accepted, but COULDN'T be saved to the SD card");
+    const bool ok = sdcardWriteFile(file, text);
+    if (ok && strcmp(file, kMemoriesFile) == 0) memoryLoad();  // so a background save can't undo the edit
+    ESP_LOGI(TAG, "new %s %s", file, ok ? "accepted and saved" : "accepted, but COULDN'T be saved to the SD card");
     std::lock_guard<std::mutex> g(s_lock);
     s_result = ok ? "accepted" : "declined";
 }

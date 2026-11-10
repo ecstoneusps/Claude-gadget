@@ -28,6 +28,7 @@ struct AssistantConfig {
     std::string visionUrl;    // Ollama, for "what do you see?" ("" = no vision)
     std::string visionModel;  // e.g. gemma3:4b
     bool memory = true;       // "remember that ...": notes on the SD card, given to the AI
+    bool learn = true;        // after a chat, the AI picks out lasting facts and adds them to the notes
 };
 
 // What the UI should show, posted to the queue given to assistantStart().

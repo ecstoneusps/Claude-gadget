@@ -68,6 +68,7 @@ ha_pipeline                  = Buddy  # name of the voice assistant in Home Assi
 conversation                 = on     # off = only the built-in commands
 follow_up                    = on     # keep listening after an answer, no "Hey Buddy" needed
 memory                       = on     # "remember that ..." notes, kept in memories.txt and told to the AI
+learn                        = on     # after a chat, the AI adds lasting facts it heard to memories.txt (check them on the settings page)
 welcome_back_minutes         = 20     # say hello out loud when you come back after this long away (0 = off)
 
 # --- Seeing ("what do you see?", "what am I holding?") ---

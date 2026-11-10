@@ -243,3 +243,53 @@ std::string MemoryStore::promptBlock(size_t maxChars) const {
     block += ". Use them when they help; don't recite them unprompted.]\n";
     return block;
 }
+
+std::string learnPrompt(const std::vector<std::pair<std::string, std::string>>& transcript,
+                        const std::vector<std::string>& notes) {
+    std::string p =
+        "[Note-taking task, not a chat. Reply only with the list, no emotion tag, no other words.]\n"
+        "Below is a conversation between you (Buddy) and your owner. Write down any lasting facts about your "
+        "owner, or the people and pets in their life, that would help in future conversations: names, "
+        "birthdays, likes and dislikes, hobbies, plans with dates, important events. One fact per line, "
+        "written the way your owner would say it, starting with \"My\" or \"I\" (for example: My dog's name is "
+        "King). Leave out anything temporary (the weather, the time, what they're doing right now), anything "
+        "only you said, and anything already in your notes. If nothing is worth keeping, reply with just: NONE\n";
+    if (!notes.empty()) {
+        p += "\nAlready in your notes:\n";
+        for (const auto& n : notes) p += "- " + n + "\n";
+    }
+    p += "\nConversation:\n";
+    for (const auto& [who, said] : transcript) p += (who == "owner" ? "Owner: " : "Buddy: ") + said + "\n";
+    return p;
+}
+
+std::vector<std::string> parseLearnedFacts(const std::string& reply) {
+    std::vector<std::string> out;
+    std::istringstream in(reply);
+    std::string line;
+    while (std::getline(in, line)) {
+        std::string f = trim(line);
+        // Emotion tags and list markers: "[happy]", "- ", "* ", "• ", "1. ", "2) ".
+        while (!f.empty() && f[0] == '[') {
+            const size_t close = f.find(']');
+            if (close == std::string::npos) break;
+            f = trim(f.substr(close + 1));
+        }
+        if (f.rfind("\xE2\x80\xA2", 0) == 0) f = trim(f.substr(3));  // bullet
+        while (!f.empty() && (f[0] == '-' || f[0] == '*')) f = trim(f.substr(1));
+        size_t d = 0;
+        while (d < f.size() && isdigit((unsigned char)f[d])) ++d;
+        if (d > 0 && d < f.size() && (f[d] == '.' || f[d] == ')')) f = trim(f.substr(d + 1));
+        if (f.size() >= 2 && (f[0] == '"' || f[0] == '\'') && f.back() == f[0]) f = trim(f.substr(1, f.size() - 2));
+        while (!f.empty() && (f.back() == ' ' || f.back() == '.')) f.pop_back();
+        if (f.size() < 8 || f.size() > 160) continue;
+        if (f.back() == '?' || f.back() == ':') continue;
+        // Facts about the owner only: they start with "my" or "I" (I'm, I've, I have, I like...).
+        const std::string l = lower(f);
+        const bool mine = l.rfind("my ", 0) == 0 || l.rfind("i ", 0) == 0 || l.rfind("i'm ", 0) == 0 ||
+                          l.rfind("i've ", 0) == 0 || l.rfind("i'll ", 0) == 0 || l.rfind("i'd ", 0) == 0;
+        if (!mine || l.find("none") == 0) continue;
+        out.push_back(f);
+    }
+    return out;
+}

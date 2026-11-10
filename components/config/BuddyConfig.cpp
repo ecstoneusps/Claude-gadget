@@ -233,6 +233,8 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
             else cfg.visionModel = val;
         } else if (key == "welcome_back_minutes") {
             if (!parseInt(val, 0, 1440, cfg.welcomeBackMinutes)) bad("must be 0-1440");
+        } else if (key == "learn") {
+            if (!parseBool(val, cfg.learn)) bad("must be on or off");
         } else if (key == "memory") {
             if (!parseBool(val, cfg.memory)) bad("must be on or off");
         } else if (key == "follow_up") {
@@ -300,6 +302,7 @@ void addAiSection(std::string& t) {
     onoff("conversation", d.conversation, "off = only the built-in commands");
     onoff("follow_up", d.followUp, "keep listening after an answer, no \"Hey Buddy\" needed");
     onoff("memory", d.memory, "\"remember that ...\" notes, kept in memories.txt and told to the AI");
+    onoff("learn", d.learn, "after a chat, the AI adds lasting facts it heard to memories.txt (check them on the settings page)");
     snprintf(buf, sizeof buf, "%-28s = %-6d # %s", "welcome_back_minutes", d.welcomeBackMinutes,
              "say hello out loud when you come back after this long away (0 = off)");
     add(buf);

@@ -37,3 +37,12 @@ bool isVisionRequest(const std::string& heard);
 // Whether recognized speech asks for a photo ("take a picture of me",
 // "can you take a selfie"), anywhere in the sentence.
 bool isPhotoRequest(const std::string& heard);
+
+// For speaking a reply while the AI is still writing it: where the first
+// complete sentence in text[from..] ends (the index just past it and the
+// spaces after it), or std::string::npos if no sentence is complete yet.
+// A sentence ends at . ! ? or a line break followed by a space or line break
+// (so "3.5" and "e.g." in the middle of a word don't count), and is at least
+// a few words long so a reply isn't chopped into tiny pieces. A very long
+// sentence is cut at a comma or space instead.
+size_t sentenceEnd(const std::string& text, size_t from);

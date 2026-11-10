@@ -278,6 +278,51 @@ static void test_memory_store() {
     CHECK(b.find("note number 0 ") == std::string::npos);
 }
 
+static void test_sentence_end() {
+    const std::string npos_ = "";
+    const size_t NP = std::string::npos;
+    // Still being written: no complete sentence yet.
+    CHECK(sentenceEnd("[happy] Hello there", 0) == NP);
+    CHECK(sentenceEnd("[happy] Hello there!", 0) == NP);  // no space after it yet: more may follow
+    const std::string a = "[happy] Hello there! How are you today? I'm";
+    const size_t e1 = sentenceEnd(a, 0);
+    CHECK(e1 != NP && a.substr(0, e1) == "[happy] Hello there! ");
+    const size_t e2 = sentenceEnd(a, e1);
+    CHECK(e2 != NP && a.substr(e1, e2 - e1) == "How are you today? ");
+    CHECK(sentenceEnd(a, e2) == NP);
+    // Short bits wait for more; numbers and abbreviations inside words don't end a sentence.
+    CHECK(sentenceEnd("Hi. ", 0) == NP);
+    CHECK(sentenceEnd("It costs 3.5 dollars and more", 0) == NP);
+    const std::string b = "Version 2.0 is out now. Yes";
+    const size_t e3 = sentenceEnd(b, 0);
+    CHECK(e3 != NP && b.substr(0, e3) == "Version 2.0 is out now. ");
+    // A line break ends one too.
+    const std::string c = "Here is a list of things:\n- apples\n";
+    CHECK(sentenceEnd(c, 0) == c.find('\n') + 1);
+    // A long run without punctuation is cut at a comma.
+    std::string d;
+    for (int i = 0; i < 12; ++i) d += "and then some more words, ";
+    const size_t e4 = sentenceEnd(d, 0);
+    CHECK(e4 != NP && e4 <= 182 && d[e4 - 2] == ',');
+    (void)npos_;
+}
+
+static void test_learned_facts() {
+    const auto facts = parseLearnedFacts(
+        "[happy] Here's what I learned:\n- My dog's name is King.\n2. I like hiking on weekends\n"
+        "* \"My sister Anna lives in Ohio\"\nNONE\nDid you know that?\nOk\n\u2022 I'm a mail carrier\n");
+    CHECK(facts.size() == 4);
+    CHECK(facts.size() == 4 && facts[0] == "My dog's name is King" && facts[1] == "I like hiking on weekends" &&
+          facts[2] == "My sister Anna lives in Ohio" && facts[3] == "I'm a mail carrier");
+    CHECK(parseLearnedFacts("NONE").empty());
+    CHECK(parseLearnedFacts("[neutral] NONE.").empty());
+    const std::string p = learnPrompt({{"owner", "I got a new puppy named Max"}, {"buddy", "Aww, I love Max!"}},
+                                      {"My dog's name is King"});
+    CHECK(p.find("Owner: I got a new puppy named Max") != std::string::npos);
+    CHECK(p.find("Buddy: Aww, I love Max!") != std::string::npos);
+    CHECK(p.find("- My dog's name is King") != std::string::npos);
+}
+
 int main() {
     test_split_leading_tag();
     test_split_no_tag();
@@ -297,6 +342,8 @@ int main() {
     test_memory_commands();
     test_second_person();
     test_memory_store();
+    test_sentence_end();
+    test_learned_facts();
     if (failures) {
         printf("assist tests: %d failure(s)\n", failures);
         return 1;

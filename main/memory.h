@@ -16,3 +16,5 @@ MemoryResult memoryForgetAll();        // the old file is kept as memories-backu
 
 std::string memoryPromptBlock();       // for the AI ("" if nothing remembered)
 size_t memoryCount();
+#include <vector>
+std::vector<std::string> memoryNotes();  // a copy of all notes, oldest first

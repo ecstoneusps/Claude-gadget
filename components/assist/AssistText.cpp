@@ -211,3 +211,32 @@ bool isPhotoRequest(const std::string& heard) {
         if (h.find(p) != std::string::npos) return true;
     return false;
 }
+
+size_t sentenceEnd(const std::string& text, size_t from) {
+    constexpr size_t kMinChars = 12;    // "Sure thing!" is fine on its own; "Hi." waits for more
+    constexpr size_t kLongChars = 180;  // past this, cut at a comma or space
+    const size_t n = text.size();
+    size_t letters = 0;
+    for (size_t i = from; i < n; ++i) {
+        const char c = text[i];
+        if (isalpha((unsigned char)c)) ++letters;
+        const bool punct = c == '.' || c == '!' || c == '?';
+        const bool ends = c == '\n' || (punct && i + 1 < n && (text[i + 1] == ' ' || text[i + 1] == '\n'));
+        if (ends && letters >= 2 && i + 1 - from >= kMinChars) {
+            size_t end = i + 1;
+            while (end < n && (text[end] == ' ' || text[end] == '\n')) ++end;
+            return end;
+        }
+        if (i + 1 - from >= kLongChars) {
+            // No sentence end yet in a long run: break at the last comma, else the last space.
+            size_t cut = text.rfind(", ", i);
+            if (cut == std::string::npos || cut < from + kMinChars) cut = text.rfind(' ', i);
+            if (cut != std::string::npos && cut > from + kMinChars) {
+                size_t end = cut + 1;
+                while (end < n && text[end] == ' ') ++end;
+                return end;
+            }
+        }
+    }
+    return std::string::npos;
+}
