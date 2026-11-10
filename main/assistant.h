@@ -67,5 +67,10 @@ bool assistantSttDone();  // Home Assistant decided you stopped talking
 // from an AI conversation turn (the microphones are waiting for this to
 // finish; follow-up questions about the photo then go to the vision model).
 // Pass jpeg = nullptr if the photo couldn't be taken (it lets go of the turn).
+// Says something on its own, not in answer to anything (e.g. "welcome back"):
+// `text` may start with an emotion tag, like an AI reply. False if Home
+// Assistant isn't connected or a conversation is going on.
+bool assistantSay(const std::string& text);
+
 bool assistantCanSee();  // vision is set up and Home Assistant is connected (to speak)
 void assistantLook(uint8_t* jpeg, size_t len, const std::string& question, bool fromConversation);

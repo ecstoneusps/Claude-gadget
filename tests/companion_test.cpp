@@ -721,9 +721,31 @@ static void test_action_commands() {
     CHECK(!isActionCommand(VoiceCommand::HowAreYou));
 }
 
+static void test_welcome_back() {
+    WelcomeBack w;
+    w.minAwayMs = 20u * 60u * 1000u;
+    CHECK(w.onArrived(1000).empty());                    // first arrival after start: nothing to say
+    w.onLeft(10000);
+    CHECK(w.onArrived(10000 + 5u * 60u * 1000u).empty());  // only 5 minutes away
+    w.onLeft(1000000);
+    const std::string a = w.onArrived(1000000 + 30u * 60u * 1000u);
+    CHECK(!a.empty() && a[0] == '[');                    // 30 minutes: hello, with an emotion tag
+    CHECK(w.onArrived(1000000 + 31u * 60u * 1000u).empty());  // only once per absence
+    w.onLeft(5000000);
+    const std::string b = w.onArrived(5000000 + 30u * 60u * 1000u);
+    CHECK(!b.empty() && b != a);                         // not the same phrase twice in a row
+    w.onLeft(10000000);
+    const std::string c = w.onArrived(10000000 + 3u * 3600u * 1000u);
+    CHECK(!c.empty() && c.find("I've been waiting") != std::string::npos);  // a few hours: a longer greeting
+    w.minAwayMs = 0;
+    w.onLeft(0);
+    CHECK(w.onArrived(100u * 60u * 1000u).empty());      // 0 = off
+}
+
 int main() {
     struct { const char* name; void (*fn)(); } tests[] = {
         {"tap makes happy then neutral", test_tap_makes_happy_then_neutral},
+        {"welcome back after a long absence", test_welcome_back},
         {"idle sleep, dim, wake", test_idle_sleep_and_dim_then_wake},
         {"wake word then command", test_wake_word_listens_then_command_reacts},
         {"command timeout is confused", test_command_timeout_is_confused},

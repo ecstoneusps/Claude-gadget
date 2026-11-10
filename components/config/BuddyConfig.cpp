@@ -222,6 +222,8 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
         } else if (key == "vision_model") {
             if (val.empty() || val.find(' ') != std::string::npos) bad("must be a model name like gemma3:4b");
             else cfg.visionModel = val;
+        } else if (key == "welcome_back_minutes") {
+            if (!parseInt(val, 0, 1440, cfg.welcomeBackMinutes)) bad("must be 0-1440");
         } else if (key == "memory") {
             if (!parseBool(val, cfg.memory)) bad("must be on or off");
         } else if (key == "follow_up") {
@@ -283,6 +285,9 @@ void addAiSection(std::string& t) {
     onoff("conversation", d.conversation, "off = only the built-in commands");
     onoff("follow_up", d.followUp, "keep listening after an answer, no \"Hey Buddy\" needed");
     onoff("memory", d.memory, "\"remember that ...\" notes, kept in memories.txt and told to the AI");
+    snprintf(buf, sizeof buf, "%-28s = %-6d # %s", "welcome_back_minutes", d.welcomeBackMinutes,
+             "say hello out loud when you come back after this long away (0 = off)");
+    add(buf);
     add("");
     add("# --- Seeing (\"what do you see?\", \"what am I holding?\") ---");
     add("# Photos go straight to a vision model in Ollama on your PC; the answer is");

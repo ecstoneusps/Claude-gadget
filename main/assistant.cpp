@@ -57,6 +57,8 @@ static size_t s_lookLen = 0;
 static std::string s_lookQuestion;
 static bool s_lookFromConversation = false;
 static std::string s_lookMarker;  // posted to the inbox (compared by address)
+static std::string s_sayMarker;   // likewise: say s_sayText out loud
+static std::string s_sayText;
 // Assistant task only: the last photo and what was said about it, so
 // follow-up questions ("what colour is it?") can go back to the vision model.
 static std::string s_visionImage;  // base64 JPEG
@@ -901,6 +903,9 @@ static void assistantTask(void*) {
         if (xQueueReceive(s_inbox, &msg, wait) == pdTRUE) {
             if (msg == &s_lookMarker) {
                 handleLook();
+            } else if (msg == &s_sayMarker) {
+                ESP_LOGI(TAG, "saying on its own: \"%s\"", s_sayText.c_str());
+                deliverReply(s_sayText, false);  // the microphones aren't waiting: no follow-up
             } else if (msg == &s_connectedMarker) {
                 s_authSent = false;  // new connection
                 sendAuth();
@@ -979,6 +984,19 @@ void assistantEndAudio(bool heardSpeech) {
 bool assistantSttDone() { return s_sttDone.load(); }
 
 bool assistantCanSee() { return !s_cfg.visionUrl.empty() && s_ready.load(); }
+
+bool assistantSay(const std::string& text) {
+    if (!s_inbox || !s_ready.load()) return false;
+    bool expected = false;
+    if (!s_turnActive.compare_exchange_strong(expected, true)) return false;  // mid-conversation
+    s_sayText = text;
+    std::string* m = &s_sayMarker;
+    if (xQueueSend(s_inbox, &m, pdMS_TO_TICKS(100)) != pdTRUE) {
+        s_turnActive.store(false);
+        return false;
+    }
+    return true;
+}
 
 void assistantLook(uint8_t* jpeg, size_t len, const std::string& question, bool fromConversation) {
     if (!jpeg || !s_inbox || s_lookJpeg) {  // no photo, not running, or still busy with the last one

@@ -144,6 +144,25 @@ static PresenceDetector presence;
 
 static RadarPresence radarPresence;
 
+// "Welcome back" out loud after a long absence (welcome_back_minutes).
+static WelcomeBack welcomeBack;
+
+static void arrived(uint32_t now) {
+    buddy.onArrived(now);
+    const std::string hello = welcomeBack.onArrived(now);
+    if (hello.empty()) return;
+    if (buddy.isMuted()) {
+        ESP_LOGI(TAG, "welcome back: not said (\"be quiet\" is on)");
+    } else if (!aiStarted.load() || !assistantSay(hello)) {
+        ESP_LOGI(TAG, "welcome back: not said (Home Assistant not connected, or busy)");
+    }
+}
+
+static void left(uint32_t now) {
+    buddy.onLeft(now);
+    welcomeBack.onLeft(now);
+}
+
 // Presence radar (when one is plugged in): takes over from the proximity
 // sensor, since it notices you sitting still and further away.
 static bool handleRadar(uint32_t now) {
@@ -157,11 +176,11 @@ static bool handleRadar(uint32_t now) {
     switch (radarPresence.update(fresh && r.someone(), cm, now)) {
         case RadarPresence::Event::Arrived:
             ESP_LOGI(TAG, "someone's here (radar: %d cm)", cm);
-            buddy.onArrived(now);
+            arrived(now);
             break;
         case RadarPresence::Event::Left:
             ESP_LOGI(TAG, "they left (radar)");
-            buddy.onLeft(now);
+            left(now);
             break;
         default:
             break;
@@ -190,11 +209,11 @@ static void handleProximity(uint32_t now, bool sensorOk) {
     switch (presence.update(raw, now)) {
         case PresenceDetector::Event::Arrived:
             ESP_LOGI(TAG, "someone's here (prox %u, baseline %.0f)", raw, presence.baseline());
-            buddy.onArrived(now);
+            arrived(now);
             break;
         case PresenceDetector::Event::Left:
             ESP_LOGI(TAG, "they left (prox %u, baseline %.0f)", raw, presence.baseline());
-            buddy.onLeft(now);
+            left(now);
             break;
         default:
             break;
@@ -351,6 +370,7 @@ static void loadSettings() {
     buddy.sleepAfterLeftMs = config.sleepAfterLeavingSeconds * 1000u;
     presence.minRise = (float)config.proximitySensitivity;
     radarPresence.maxDistanceCm = config.radarDistanceCm;
+    welcomeBack.minAwayMs = (uint32_t)config.welcomeBackMinutes * 60u * 1000u;
     ESP_LOGI(TAG, "volume %d%%, brightness %d%%, sleep after %ds, face tracking %s, proximity %s",
              config.volume, config.brightness, config.sleepAfterSeconds,
              config.faceTracking ? "on" : "off", config.proximity ? "on" : "off");

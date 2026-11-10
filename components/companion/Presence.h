@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <string>
 
 // Turns raw proximity-sensor readings into "someone arrived" / "they left".
 //
@@ -52,4 +53,22 @@ private:
     bool present_ = false;
     bool near_ = false;
     uint32_t since_ = 0;  // when `near_` last changed
+};
+
+// "Welcome back": after you've been away a while, the buddy says hello out
+// loud when you return. Tell it when you leave and arrive; on arriving after
+// at least `minAwayMs` it hands back what to say (an emotion tag and a short
+// phrase, picked by how long you were gone, not the same one twice in a row).
+class WelcomeBack {
+public:
+    void onLeft(uint32_t now);
+    // "" if there's nothing to say (not away long enough, or turned off).
+    std::string onArrived(uint32_t now);
+
+    uint32_t minAwayMs = 20u * 60u * 1000u;  // 0 = never
+
+private:
+    bool away_ = false;
+    uint32_t leftAt_ = 0;
+    unsigned pick_ = 0;
 };

@@ -59,3 +59,44 @@ RadarPresence::Event RadarPresence::update(bool someone, int distanceCm, uint32_
     }
     return Event::None;
 }
+
+void WelcomeBack::onLeft(uint32_t now) {
+    away_ = true;
+    leftAt_ = now;
+}
+
+std::string WelcomeBack::onArrived(uint32_t now) {
+    if (!away_) return "";
+    away_ = false;
+    const uint32_t gone = now - leftAt_;
+    if (minAwayMs == 0 || gone < minAwayMs) return "";
+    static const char* const kShort[] = {
+        "[happy] Welcome back!",
+        "[happy] Hey, you're back!",
+        "[happy] There you are!",
+        "[love] Yay, you're back! I missed you.",
+    };
+    static const char* const kLong[] = {
+        "[love] You're back! I missed you so much.",
+        "[happy] Welcome back! It was too quiet without you.",
+        "[happy] Yay, you're home! I've been waiting for you.",
+    };
+    static const char* const kAllDay[] = {
+        "[love] Hi! It's so good to see you again.",
+        "[happy] You're back! I missed you all day.",
+        "[happy] There you are! I was wondering when you'd come back.",
+    };
+    const char* const* list;
+    unsigned n;
+    if (gone < 2u * 3600u * 1000u) {
+        list = kShort;
+        n = sizeof kShort / sizeof kShort[0];
+    } else if (gone < 8u * 3600u * 1000u) {
+        list = kLong;
+        n = sizeof kLong / sizeof kLong[0];
+    } else {
+        list = kAllDay;
+        n = sizeof kAllDay / sizeof kAllDay[0];
+    }
+    return list[pick_++ % n];
+}

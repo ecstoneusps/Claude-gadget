@@ -334,6 +334,7 @@ and restart the buddy.
 | `follow_up` | `off` makes it go back to waiting for "Hey Buddy" after each answer |
 | `vision_url`, `vision_model` | Ollama's address and a vision model, for "what do you see?" |
 | `memory` | `off` stops "remember that ..." notes (kept in `memories.txt`) |
+| `welcome_back_minutes` | After you've been away at least this long (20 minutes by default), Buddy says hello out loud when you come back ("Welcome back!", "You're back! I missed you so much."). Needs Home Assistant; stays silent while "be quiet" is on. `0` turns it off |
 
 When an update adds new settings, they're added to the end of your
 `settings.txt` (at their default values, with their explanations) the next
