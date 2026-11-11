@@ -42,6 +42,7 @@ struct AssistEvent {
         Error,     // something failed (see the log); `text` says what
         WakeAgain, // you only said "Hey Buddy" (during a follow-up): it listens again
         Look,      // you asked about what it sees (`text`): take a photo, then assistantLook()
+        LookSaved, // you asked about a photo it took (`text`): load the newest one, then assistantLook(..., saved = true)
     } type;
     bool followUp;
     int command;
@@ -76,4 +77,9 @@ bool assistantSttDone();  // Home Assistant decided you stopped talking
 bool assistantSay(const std::string& text);
 
 bool assistantCanSee();  // vision is set up and Home Assistant is connected (to speak)
-void assistantLook(uint8_t* jpeg, size_t len, const std::string& question, bool fromConversation);
+void assistantLook(uint8_t* jpeg, size_t len, const std::string& question, bool fromConversation,
+                   bool saved = false);
+
+// A photo was just taken and saved as `name` (e.g. "IMG_0007.jpg"): the vision
+// model describes it in the background, for photonotes. Takes ownership of `jpeg`.
+void assistantPhotoTaken(uint8_t* jpeg, size_t len, const std::string& name);

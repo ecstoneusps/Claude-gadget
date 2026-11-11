@@ -21,6 +21,7 @@
 #include "audio_io.h"
 #include "cpustats.h"
 #include "memory.h"
+#include "photonotes.h"
 #include <algorithm>
 #include "Memory.h"
 #include "sound.h"
@@ -57,6 +58,10 @@ static uint8_t* s_lookJpeg = nullptr;
 static size_t s_lookLen = 0;
 static std::string s_lookQuestion;
 static bool s_lookFromConversation = false;
+static bool s_lookSaved = false;          // the photo is one he took earlier (not what he sees now)
+static bool s_visionSaved = false;        // likewise, for the photo the current vision chat is about
+static std::string s_lastQuestion;        // what the owner last asked the chat AI
+static std::string s_sawNote;             // what he last saw, told to the chat AI next time
 static std::string s_lookMarker;  // posted to the inbox (compared by address)
 // Home Assistant's address for the Wi-Fi network it's on: ha_url at home (the
 // first network), ha_url_away on any other one (if set).
@@ -248,10 +253,26 @@ static void startIntentRun(const std::string& said) {
     if (s_chatLog.size() < 40) s_chatLog.emplace_back("owner", said);
     s_lastChatMs = nowMs();
     const bool newConversation = s_conversationId.empty() || (int32_t)(s_conversationUntil - nowMs()) <= 0;
+    s_lastQuestion = said;
     std::string text = said;
     if (s_cfg.memory && (newConversation || s_notesChanged)) {
-        text = memoryPromptBlock() + said;
+        text = memoryPromptBlock() + text;
         s_notesChanged = false;
+    }
+    // His eyes: the chat AI can't see, but it can ask for a look with [look],
+    // or a second look at a photo he took with [photo].
+    if (newConversation && !s_cfg.visionUrl.empty()) {
+        text = std::string(
+                   "[You can see through your camera. If answering needs you to look at something right now "
+                   "(what's in front of you, what your owner is holding, wearing or showing, how many fingers "
+                   "they hold up, how they look), reply with only the tag [look] and nothing else, and you'll "
+                   "get a photo to answer from. If they ask about a photo you took earlier, answer from its "
+                   "description below, or reply with only [photo] to look at your newest photo again.]\n") +
+               photoNotesPromptBlock() + text;
+    }
+    if (!s_sawNote.empty()) {  // so "what did you just see?" works in the chat too
+        text = "[What you saw when you last looked: " + s_sawNote + "]\n" + text;
+        s_sawNote.clear();
     }
     s_runId = s_nextId++;
     cJSON* m = cJSON_CreateObject();
@@ -739,8 +760,26 @@ static void handleReply(const cJSON* intentOutput) {
         s_conversationId = cid;
         s_conversationUntil = nowMs() + kConversationMs;
     }
-    if (said && s_chatLog.size() < 40) s_chatLog.emplace_back("buddy", splitReply(said).speech);
     s_lastChatMs = nowMs();
+    // [look] / [photo]: the chat AI wants his eyes to answer. Take a photo (or
+    // load the newest one he took) and ask the vision model the question.
+    const ReplyParts parts = splitReply(said ? said : "");
+    if (!s_cfg.visionUrl.empty() && (parts.emotion == "look" || parts.emotion == "photo")) {
+        const bool saved = parts.emotion == "photo";
+        ESP_LOGI(TAG, "-> the AI wants to %s", saved ? "look at the newest photo again" : "take a look");
+        if (s_streamStarted) {  // let anything it already said ("let me see!") finish first
+            const ReplyParts rest = splitReply(s_streamText.substr(s_streamUsed));
+            sayPiece(rest.speech);
+            resetStream();
+            const uint32_t gen = sayEnd();
+            for (int waited = 0; s_sayDoneGen.load() != gen && waited < 60000; waited += 20) vTaskDelay(pdMS_TO_TICKS(20));
+        }
+        finishTurn();
+        s_turnActive.store(true);  // until the photo arrives
+        post(saved ? AssistEvent::LookSaved : AssistEvent::Look, s_lastQuestion.c_str());
+        return;
+    }
+    if (said && s_chatLog.size() < 40) s_chatLog.emplace_back("buddy", parts.speech);
     deliverReply(said ? said : "", true);
 }
 
@@ -770,7 +809,11 @@ static void addVisionMessages(cJSON* msgs, const std::string& question) {
         }
         cJSON_AddItemToArray(msgs, m);
     };
-    add("system", std::string(kVisionPrompt) + (s_cfg.memory ? "\n" + memoryPromptBlock() : std::string()), false);
+    std::string system = kVisionPrompt;
+    if (s_visionSaved)  // a photo from the card, not the live view
+        system += " (This image is not what you see right now: it's a photo you took earlier, which your owner "
+                  "is asking about.)";
+    add("system", system + (s_cfg.memory ? "\n" + memoryPromptBlock() : std::string()), false);
     bool first = true;
     for (const auto& [role, text] : s_visionChat) {
         add(role.c_str(), text, first && role == "user");
@@ -781,22 +824,14 @@ static void addVisionMessages(cJSON* msgs, const std::string& question) {
 
 static void rememberVisionAnswer(const std::string& question, const std::string& answer) {
     if (answer.empty()) return;
+    s_sawNote = splitReply(answer).speech;
     s_visionChat.emplace_back("user", question);
     s_visionChat.emplace_back("assistant", answer);
     s_visionUntil = nowMs() + kVisionFollowUpMs;
 }
 
-// At home: straight to Ollama on the home network. Blocks until it answers.
-static std::string askVision(const std::string& question) {
-    cJSON* req = cJSON_CreateObject();
-    cJSON_AddStringToObject(req, "model", s_cfg.visionModel.c_str());
-    cJSON_AddBoolToObject(req, "stream", false);
-    cJSON_AddStringToObject(req, "keep_alive", "10m");
-    addVisionMessages(cJSON_AddArrayToObject(req, "messages"), question);
-    char* body = cJSON_PrintUnformatted(req);
-    cJSON_Delete(req);
-    if (!body) return "";
-
+// POSTs a request to Ollama's /api/chat at home and returns the answer ("" on failure).
+static std::string ollamaChat(char* body) {
     const std::string url = s_cfg.visionUrl + "/api/chat";
     esp_http_client_config_t hc = {};
     hc.url = url.c_str();
@@ -837,6 +872,21 @@ static std::string askVision(const std::string& question) {
     std::string answer = content ? content : "";
     cJSON_Delete(j);
     ESP_LOGI(TAG, "vision model answered in %d ms", (int)((esp_timer_get_time() - t0) / 1000));
+    return answer;
+}
+
+// At home: straight to Ollama on the home network. Blocks until it answers.
+static std::string askVision(const std::string& question) {
+    cJSON* req = cJSON_CreateObject();
+    cJSON_AddStringToObject(req, "model", s_cfg.visionModel.c_str());
+    cJSON_AddBoolToObject(req, "stream", false);
+    cJSON_AddStringToObject(req, "keep_alive", "10m");
+    addVisionMessages(cJSON_AddArrayToObject(req, "messages"), question);
+    char* body = cJSON_PrintUnformatted(req);
+    cJSON_Delete(req);
+    if (!body) return "";
+
+    const std::string answer = ollamaChat(body);
     rememberVisionAnswer(question, answer);
     return answer;
 }
@@ -927,6 +977,7 @@ static void handleLook() {
     const size_t len = s_lookLen;
     const std::string question = s_lookQuestion.empty() ? "What do you see?" : s_lookQuestion;
     const bool micsWaiting = s_lookFromConversation;
+    s_visionSaved = s_lookSaved;
     s_lookJpeg = nullptr;
 
     // A new photo starts a new little conversation about it.
@@ -1234,6 +1285,71 @@ static void assistantTask(void*) {
 
 // ---------------------------------------------------------------------------
 
+// New photos are described by the vision model in the background, so the chat
+// AI knows what's in them ("what was in the picture you took?"). At home only:
+// Ollama is reached directly; away from home photos simply aren't described.
+struct DescribeJob {
+    uint8_t* jpeg;
+    size_t len;
+    std::string* name;
+};
+static QueueHandle_t s_describeQ = nullptr;
+
+static void describerTask(void*) {
+    while (true) {
+        DescribeJob job;
+        if (xQueueReceive(s_describeQ, &job, portMAX_DELAY) != pdTRUE) continue;
+        std::string b64;
+        size_t b64len = 0;
+        mbedtls_base64_encode(nullptr, 0, &b64len, job.jpeg, job.len);
+        b64.resize(b64len);
+        size_t written = 0;
+        const bool encoded =
+            mbedtls_base64_encode((unsigned char*)&b64[0], b64len, &written, job.jpeg, job.len) == 0;
+        heap_caps_free(job.jpeg);
+        if (encoded && !awayFromHome()) {
+            b64.resize(written);
+            cJSON* req = cJSON_CreateObject();
+            cJSON_AddStringToObject(req, "model", s_cfg.visionModel.c_str());
+            cJSON_AddBoolToObject(req, "stream", false);
+            cJSON_AddStringToObject(req, "keep_alive", "10m");
+            cJSON* msgs = cJSON_AddArrayToObject(req, "messages");
+            cJSON* m = cJSON_CreateObject();
+            cJSON_AddStringToObject(m, "role", "user");
+            cJSON_AddStringToObject(m, "content",
+                                    "Describe this photo in one or two plain sentences: who or what is in it, what "
+                                    "they're doing, anything notable (like how many fingers someone holds up, or "
+                                    "text you can read). No emotion tags, no markdown.");
+            cJSON_AddItemToArray(cJSON_AddArrayToObject(m, "images"), cJSON_CreateString(b64.c_str()));
+            cJSON_AddItemToArray(msgs, m);
+            std::string().swap(b64);
+            char* body = cJSON_PrintUnformatted(req);
+            cJSON_Delete(req);
+            if (body) {
+                std::string desc = splitReply(ollamaChat(body)).speech;
+                if (!desc.empty()) photoNotesAdd(*job.name, desc);
+                else ESP_LOGW(TAG, "couldn't describe %s", job.name->c_str());
+            }
+        } else if (encoded) {
+            ESP_LOGI(TAG, "%s not described: away from home (the vision model is only reachable there)",
+                     job.name->c_str());
+        }
+        delete job.name;
+    }
+}
+
+void assistantPhotoTaken(uint8_t* jpeg, size_t len, const std::string& name) {
+    if (!s_describeQ || s_cfg.visionUrl.empty()) {
+        heap_caps_free(jpeg);
+        return;
+    }
+    DescribeJob job{jpeg, len, new std::string(name)};
+    if (xQueueSend(s_describeQ, &job, 0) != pdTRUE) {
+        heap_caps_free(jpeg);
+        delete job.name;
+    }
+}
+
 bool assistantStart(const AssistantConfig& cfg, QueueHandle_t events) {
     if (cfg.url.empty() || cfg.token.empty()) return false;
     s_cfg = cfg;
@@ -1246,6 +1362,10 @@ bool assistantStart(const AssistantConfig& cfg, QueueHandle_t events) {
     // Stack in PSRAM: internal RAM is scarce, and this task never touches flash.
     // Priority 5, above the UI (4): otherwise fetching a reply only ran in the
     // UI's short pauses, which made replies slow and starved the idle task.
+    s_describeQ = xQueueCreate(3, sizeof(DescribeJob));
+    if (!s_describeQ || xTaskCreatePinnedToCoreWithCaps(describerTask, "describer", 8192, nullptr, 2, nullptr, 1,
+                                                        MALLOC_CAP_SPIRAM) != pdPASS)
+        ESP_LOGW(TAG, "couldn't start describing photos");
     s_sayQ = xQueueCreate(32, sizeof(SayItem));
     if (!s_sayQ || xTaskCreatePinnedToCoreWithCaps(speakerTask, "speaker", 8192, nullptr, 5, nullptr, 1,
                                                    MALLOC_CAP_SPIRAM) != pdPASS) {
@@ -1304,7 +1424,7 @@ bool assistantSay(const std::string& text) {
     return true;
 }
 
-void assistantLook(uint8_t* jpeg, size_t len, const std::string& question, bool fromConversation) {
+void assistantLook(uint8_t* jpeg, size_t len, const std::string& question, bool fromConversation, bool saved) {
     if (!jpeg || !s_inbox || s_lookJpeg) {  // no photo, not running, or still busy with the last one
         heap_caps_free(jpeg);
         if (fromConversation) {
@@ -1317,6 +1437,7 @@ void assistantLook(uint8_t* jpeg, size_t len, const std::string& question, bool 
     s_lookLen = len;
     s_lookQuestion = question;
     s_lookFromConversation = fromConversation;
+    s_lookSaved = saved;
     std::string* m = &s_lookMarker;
     xQueueSend(s_inbox, &m, pdMS_TO_TICKS(100));
 }

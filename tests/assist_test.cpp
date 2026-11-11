@@ -210,6 +210,10 @@ static void test_vision_requests() {
     CHECK(isPhotoRequest("Hey buddy, can you take a selfie?"));
     CHECK(!isPhotoRequest("What's a good camera to take pictures with?"));
     CHECK(!isVisionRequest("Take a picture of me!"));
+    CHECK(isVisionRequest("How many fingers am I holding up?"));
+    CHECK(isVisionRequest("hey buddy look at me"));
+    CHECK(isVisionRequest("Do I look tired today?"));
+    CHECK(!isVisionRequest("How many days until Christmas?"));
 }
 
 static void test_memory_commands() {

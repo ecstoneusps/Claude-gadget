@@ -159,6 +159,17 @@ default since tracking costs a lot of CPU for little movement on this screen).
   in Ollama on your PC, then says the answer with a matching face. For about a
   minute afterwards, follow-up questions ("what colour is it?") are about the
   same photo. Photos taken just to look aren't saved.
+- **He knows when he needs to look**, however you put it: "how many fingers am
+  I holding up?", "do I look tired?". Besides the phrases above, the AI is told
+  it can ask for his eyes: it answers with a `[look]` tag, and he takes a photo
+  and asks the vision model your question. What he saw is passed back to the
+  chat, so "what did you just see?" works too.
+- **He remembers his photos.** Each photo he takes ("take a picture") is
+  described by the vision model in the background and the description saved
+  next to it (`photos/IMG_0007.txt`). The newest few are given to the AI, so
+  "what was in the picture you took?" gets an answer; for a closer look it can
+  answer `[photo]` and he shows the newest photo to the vision model again.
+  (Photos taken away from home aren't described.)
 
 Vision setup (once): on the PC run `ollama pull gemma3:4b`, then set
 `vision_url` to Ollama's address (the same one Home Assistant uses, e.g.

@@ -48,6 +48,7 @@
 #include "voice.h"
 #include "wifi.h"
 #include "webui.h"
+#include "photonotes.h"
 
 static const char* TAG = "main";
 
@@ -298,6 +299,26 @@ static void handleVoice(uint32_t now) {
 
 static void startPhoto(bool look, const std::string& question, bool fromConversation, uint32_t now);
 
+// The AI asked to look at the newest photo he took again ([photo]): load it
+// from the card and hand it to the vision model with the question.
+static void lookAtSavedPhoto(const char* question) {
+    const std::string name = photoNotesLatest();
+    std::vector<uint8_t> data;
+    if (name.empty() || !sdcardReadBinary(("photos/" + name).c_str(), data, 1024 * 1024)) {
+        ESP_LOGW(TAG, "no saved photo to look at");
+        assistantLook(nullptr, 0, question, true);
+        return;
+    }
+    uint8_t* jpeg = (uint8_t*)heap_caps_malloc(data.size(), MALLOC_CAP_SPIRAM);
+    if (!jpeg) {
+        assistantLook(nullptr, 0, question, true);
+        return;
+    }
+    memcpy(jpeg, data.data(), data.size());
+    ESP_LOGI(TAG, "looking at photos/%s again", name.c_str());
+    assistantLook(jpeg, data.size(), question, true, true);  // takes the JPEG
+}
+
 // The AI conversation: thinking, the answer's mood, the mouth while it speaks.
 static void handleAssistant(uint32_t now) {
     if (!aiStarted.load()) return;
@@ -318,6 +339,7 @@ static void handleAssistant(uint32_t now) {
             case AssistEvent::Error: buddy.onAssistantError(now); break;
             case AssistEvent::WakeAgain: buddy.onWakeWord(now); break;
             case AssistEvent::Look: startPhoto(true, ev.text, true, now); break;
+            case AssistEvent::LookSaved: lookAtSavedPhoto(ev.text); break;
         }
     }
     buddy.setSpeaking(soundSpeaking(), soundSpeechLevel());
@@ -378,6 +400,7 @@ static void loadSettings() {
         }
     }
     if (config.memory) memoryLoad();
+    photoNotesLoad();  // what the photos on the card show
     buddy.sleepAfterMs = config.sleepAfterSeconds * 1000u;
     buddy.dimAfterMs = config.dimAfterSeconds * 1000u;
     buddy.sleepAfterLeftMs = config.sleepAfterLeavingSeconds * 1000u;
@@ -521,9 +544,14 @@ static bool runPhoto(uint32_t now) {
             buddy.onAssistantError(now);
         } else if (!photo.look) {
             const std::string name = sdcardSavePhoto(jpeg, len);
-            heap_caps_free(jpeg);
             photo.caption = !sdcardMounted() ? "No SD card to save it on" : name.empty() ? "Couldn't save it" : name;
-            if (!name.empty()) ESP_LOGI(TAG, "saved photos/%s", name.c_str());
+            if (!name.empty()) {
+                ESP_LOGI(TAG, "saved photos/%s", name.c_str());
+                photoNotesSaved(name);
+            }
+            // The vision model describes it in the background, so he knows what's in it later.
+            if (!name.empty() && aiStarted.load() && assistantCanSee()) assistantPhotoTaken(jpeg, len, name);
+            else heap_caps_free(jpeg);
         } else if (aiStarted.load() && assistantCanSee()) {
             photo.caption = "Hmm...";
             assistantLook(jpeg, len, photo.question, photo.fromConversation);  // takes the JPEG
@@ -707,6 +735,7 @@ static void uiTask(void*) {
         }
         handleVolumeChange(now);
         memoryService();  // save notes to the SD card if they changed
+        photoNotesService();  // and new photo descriptions
         switch (buddy.takeCameraRequest()) {  // "take a picture" / offline "what is this"
             case Companion::CameraRequest::Photo: startPhoto(false, "", false, now); break;
             case Companion::CameraRequest::Look: startPhoto(true, "What do you see?", false, now); break;

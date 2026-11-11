@@ -193,6 +193,9 @@ bool isVisionRequest(const std::string& heard) {
         " describe what ", " read this ", " can you read ", " what color is this ", " what colour is this ",
         " what does this say ", " who is this ", " whos this ", " how do i look ", " what am i wearing ",
         " whats in front of you ", " what is in front of you ",
+        " how many fingers ", " fingers am i holding ", " am i holding up ", " what am i showing ",
+        " look at me ", " can you see me ", " what do i look like ", " do i look ", " what is on my ",
+        " whats on my ", " what color is my ", " what colour is my ", " what color am i ", " see what i ",
     };
     for (const char* p : kPhrases) {
         std::string phrase = p;
