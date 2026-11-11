@@ -485,6 +485,7 @@ static void startPhoto(bool look, const std::string& question, bool fromConversa
 }
 
 static void drawCaption(const char* text, int size, int y) {
+    canvas.setFont(&fonts::Font0);  // each screen sets its own font and size (they share the canvas)
     canvas.setTextSize(size);
     canvas.setTextDatum(textdatum_t::top_center);
     canvas.setTextColor(TFT_BLACK);
@@ -605,6 +606,7 @@ static void handleVolumeChange(uint32_t now) {
 // The settings page sent a change: ask for a tap on the screen to accept it.
 static void drawSettingsPrompt(uint32_t now) {
     canvas.fillScreen(TFT_BLACK);
+    canvas.setTextSize(1);  // the photo countdown leaves it enlarged
     canvas.setTextDatum(middle_center);
     canvas.setTextColor(TFT_WHITE);
     canvas.setFont(&fonts::FreeSansBold12pt7b);
@@ -631,6 +633,7 @@ static void drawSettingsPrompt(uint32_t now) {
 // after, to clear it).
 static void drawBottomLine(const std::string& text, uint16_t color) {
     canvas.setFont(&fonts::FreeSans9pt7b);
+    canvas.setTextSize(1);
     canvas.setTextDatum(bottom_center);
     canvas.fillRect(0, canvas.height() - 26, canvas.width(), 26, TFT_BLACK);
     canvas.setTextColor(color);
