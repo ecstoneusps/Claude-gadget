@@ -267,15 +267,15 @@ static void test_memory_store() {
     again.load(m.toText());
     CHECK(again.notes() == m.notes());
     const std::string block = m.promptBlock();
-    CHECK(block.find("I like my coffee black") != std::string::npos);
+    CHECK(block.find("Your owner likes their coffee black") != std::string::npos);
     CHECK(MemoryStore().promptBlock().empty());
     // Only the newest notes that fit.
     MemoryStore many;
     for (int i = 0; i < 200; ++i) many.add("note number " + std::to_string(i) + " about something");
     const std::string b = many.promptBlock(300);
     CHECK(b.size() < 300 + 400);  // the notes that fit, plus the instructions around them
-    CHECK(b.find("note number 199") != std::string::npos);
-    CHECK(b.find("note number 0 ") == std::string::npos);
+    CHECK(b.find("Note number 199") != std::string::npos);
+    CHECK(b.find("Note number 0 ") == std::string::npos);
 }
 
 static void test_sentence_end() {
@@ -323,6 +323,26 @@ static void test_learned_facts() {
     CHECK(p.find("- My dog's name is King") != std::string::npos);
 }
 
+static void test_third_person() {
+    CHECK_EQ(toThirdPerson("my dog's name is King"), "Your owner's dog's name is King");
+    CHECK_EQ(toThirdPerson("My name is Eric"), "Your owner's name is Eric");
+    CHECK_EQ(toThirdPerson("I like hiking on weekends"), "Your owner likes hiking on weekends");
+    CHECK_EQ(toThirdPerson("I'm a mail carrier"), "Your owner is a mail carrier");
+    CHECK_EQ(toThirdPerson("I have two cats"), "Your owner has two cats");
+    CHECK_EQ(toThirdPerson("I don't like mushrooms"), "Your owner doesn't like mushrooms");
+    CHECK_EQ(toThirdPerson("I went to Ohio last year"), "Your owner went to Ohio last year");
+    CHECK_EQ(toThirdPerson("I watch football"), "Your owner watches football");
+    CHECK_EQ(toThirdPerson("I can play guitar"), "Your owner can play guitar");
+    CHECK_EQ(toThirdPerson("my sister calls me Ricky"), "Your owner's sister calls them Ricky");
+    CHECK_EQ(toThirdPerson("I like my coffee black"), "Your owner likes their coffee black");
+    CHECK_EQ(toThirdPerson("I am allergic to cats"), "Your owner is allergic to cats");
+    MemoryStore m;
+    m.add("my dog's name is King");
+    const std::string b = m.promptBlock();
+    CHECK(b.find("Your owner's dog's name is King") != std::string::npos);
+    CHECK(b.find("\"your\" or \"yours\" means you, Buddy") != std::string::npos);
+}
+
 int main() {
     test_split_leading_tag();
     test_split_no_tag();
@@ -344,6 +364,7 @@ int main() {
     test_memory_store();
     test_sentence_end();
     test_learned_facts();
+    test_third_person();
     if (failures) {
         printf("assist tests: %d failure(s)\n", failures);
         return 1;

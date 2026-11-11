@@ -170,6 +170,96 @@ std::string toSecondPerson(const std::string& fact) {
     return out;
 }
 
+namespace {
+// "like" -> "likes", "go" -> "goes", "carry" -> "carries"; past tense and
+// modal verbs ("went", "can") stay as they are.
+std::string thirdPersonVerb(const std::string& w) {
+    static const std::set<std::string> kKeep = {
+        "can", "could", "will", "would", "should", "must", "might", "may", "shall", "used",
+        "was", "went", "got", "had", "saw", "made", "took", "came", "said", "did", "bought", "found",
+        "gave", "knew", "left", "lost", "met", "paid", "ran", "sold", "told", "thought", "won", "wrote",
+        "also", "really", "always", "never", "often", "usually", "just", "still", "sometimes"};
+    const std::string l = lower(w);
+    if (l.empty() || kKeep.count(l) || (l.size() > 3 && l.compare(l.size() - 2, 2, "ed") == 0)) return w;
+    if (l == "have") return "has";
+    if (l == "do") return "does";
+    if (l == "go") return "goes";
+    if (l == "don't" || l == "dont") return "doesn't";
+    const char c = l.back();
+    if (c == 's' || c == 'x' || c == 'z' || c == 'o' || (l.size() > 1 && (l.compare(l.size() - 2, 2, "sh") == 0 ||
+                                                                         l.compare(l.size() - 2, 2, "ch") == 0)))
+        return w + "es";
+    if (c == 'y' && l.size() > 1 && !strchr("aeiou", l[l.size() - 2])) return w.substr(0, w.size() - 1) + "ies";
+    return w + "s";
+}
+}  // namespace
+
+std::string toThirdPerson(const std::string& fact) {
+    // Split into words and the gaps between them, rewrite, join.
+    std::vector<std::string> tok;
+    for (size_t i = 0; i < fact.size();) {
+        const bool word = isalpha((unsigned char)fact[i]) || fact[i] == '\'';
+        size_t j = i;
+        while (j < fact.size() && (isalpha((unsigned char)fact[j]) || fact[j] == '\'') == word) ++j;
+        tok.push_back(fact.substr(i, j - i));
+        i = j;
+    }
+    auto isWord = [](const std::string& t) { return !t.empty() && (isalpha((unsigned char)t[0]) || t[0] == '\''); };
+    std::string out;
+    bool named = false;  // "your owner" already said once: then "their", "them"
+    auto owner = [&](const char* first, const char* later) {
+        out += named ? later : first;
+        named = true;
+    };
+    for (size_t k = 0; k < tok.size(); ++k) {
+        const std::string& t = tok[k];
+        if (!isWord(t)) {
+            out += t;
+            continue;
+        }
+        const std::string l = lower(t);
+        auto nextWord = [&](size_t from) -> int {
+            for (size_t m = from; m < tok.size(); ++m)
+                if (isWord(tok[m])) return (int)m;
+            return -1;
+        };
+        if (l == "my") {
+            owner("your owner's", "their");
+        } else if (l == "mine") {
+            owner("your owner's", "theirs");
+        } else if (l == "myself") {
+            owner("your owner", "themselves");
+        } else if (l == "me") {
+            owner("your owner", "them");
+        } else if (l == "i'm") {
+            owner("your owner is", "they're");
+        } else if (l == "i've") {
+            owner("your owner has", "they've");
+        } else if (l == "i'll") {
+            owner("your owner will", "they'll");
+        } else if (l == "i'd") {
+            owner("your owner would", "they'd");
+        } else if (l == "i" && named) {
+            out += "they";  // "they like": the plain verb is right
+        } else if (l == "i") {
+            owner("your owner", "they");
+            const int n = nextWord(k + 1);
+            if (n >= 0) {
+                // The verb after "I": "am" -> "is", "like" -> "likes".
+                const std::string v = lower(tok[n]);
+                std::string verb = v == "am" ? "is" : v == "was" ? "was" : thirdPersonVerb(tok[n]);
+                for (size_t m = k + 1; m < (size_t)n; ++m) out += tok[m];
+                out += verb;
+                k = n;
+            }
+        } else {
+            out += t;
+        }
+    }
+    if (!out.empty()) out[0] = (char)toupper((unsigned char)out[0]);
+    return out;
+}
+
 void MemoryStore::load(const std::string& text) {
     notes_.clear();
     std::istringstream in(text);
@@ -241,9 +331,12 @@ std::string MemoryStore::promptBlock(size_t maxChars) const {
     // Small models grab whatever is in front of them, so the instructions are
     // firm: these are background, used when asked or clearly on topic, not
     // worked into every answer (they'd mention the dog in every reply).
-    std::string block = "[Background notes about your owner, for reference only (\"my\" means your owner's): ";
-    for (size_t i = 0; i < picked.size(); ++i) block += (i ? "; " : "") + picked[i];
-    block += ". Don't bring these up on your own. Use a note when your owner asks about it or the "
+    // The notes are kept in the owner's words ("my dog..."); the AI gets them
+    // about "your owner", plus who "my" and "your" are when the owner talks.
+    std::string block = "[Background notes about your owner, the person talking to you, for reference only: ";
+    for (size_t i = 0; i < picked.size(); ++i) block += (i ? "; " : "") + toThirdPerson(picked[i]);
+    block += ". When your owner says \"my\" or \"mine\" they mean themselves; \"your\" or \"yours\" means "
+             "you, Buddy. Don't bring these up on your own. Use a note when your owner asks about it or the "
              "conversation is directly about that topic; an occasional natural mention is fine, but never "
              "work them into answers about something else.]\n";
     return block;

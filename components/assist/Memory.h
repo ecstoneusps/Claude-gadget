@@ -20,6 +20,11 @@ MemoryCommand parseMemoryCommand(const std::string& heard);
 // "my dog's name is King" -> "your dog's name is King", for saying it back.
 std::string toSecondPerson(const std::string& fact);
 
+// "my dog's name is King" -> "Your owner's dog's name is King", "I like hiking"
+// -> "Your owner likes hiking": how notes are put to the AI, so it can't mix
+// up whose dog it is (it said "my dog King" when the notes said "my").
+std::string toThirdPerson(const std::string& fact);
+
 class MemoryStore {
 public:
     // memories.txt: one note per line; blank lines and lines starting with #
