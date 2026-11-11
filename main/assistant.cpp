@@ -683,6 +683,23 @@ static void deliverReply(const std::string& reply, bool micsWaiting) {
     if (streamed) {
         // The part after the sentences already being spoken.
         sayPiece(splitReply(s_streamText.substr(s_streamUsed)).speech);
+        // The final answer can hold text the stream never carried: after a
+        // tool call (a web search, say) the AI writes the real answer as a
+        // second message, which may not come through as progress. Say any of
+        // its sentences that weren't already said.
+        const std::string said = normalizeSpeech(splitReply(s_streamText).speech);
+        bool missing = false;
+        auto check = [&](const std::string& piece) {
+            const std::string n = normalizeSpeech(piece);
+            if (n.empty() || (!missing && said.find(n) != std::string::npos)) return;
+            if (!missing) ESP_LOGI(TAG, "the answer has more than came while streaming (after a tool call?); saying the rest");
+            missing = true;
+            sayPiece(piece);
+        };
+        size_t used = 0;
+        for (size_t end; (end = sentenceEnd(parts.speech, used)) != std::string::npos; used = end)
+            check(parts.speech.substr(used, end - used));
+        check(parts.speech.substr(used));
     } else {
         s_sayAudio.store(false);
         post(AssistEvent::Reply, "", parts.emotion.c_str());
