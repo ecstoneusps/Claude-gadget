@@ -62,6 +62,68 @@ voice (try `af_heart` or `am_michael`; the list is in the
 [voices documentation](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md)).
 Buddy uses whatever voice the assistant is set to, no change on his side.
 
+### Searching the web (optional)
+
+A local AI model only knows what it learned in training. To let it look things
+up when it doesn't know (news, "who is the oldest living person?"), give it a
+search tool in Home Assistant. This uses **SearXNG**, a free search engine you
+run yourself with Docker (no account or API key; it asks the big search
+engines for you). Your chat model has to support tools: on the PC run
+`ollama show <model>` and look for `tools` under Capabilities (qwen3,
+llama3.1/3.2 and mistral-nemo do; gemma3 doesn't).
+
+1. On the PC: `docker run -d --name searxng --restart unless-stopped -p 8888:8080 -v C:\searxng:/etc/searxng searxng/searxng`.
+   Then open `C:\searxng\settings.yml`, make sure it has (under the existing
+   `search:` section if there is one):
+   ```yaml
+   search:
+     formats:
+       - html
+       - json
+   ```
+   and run `docker restart searxng`. Check it: `http://localhost:8888/search?q=test&format=json` shows text, not "403 Forbidden".
+2. In Home Assistant's `configuration.yaml` (with the PC's address), then restart:
+   ```yaml
+   rest_command:
+     web_search:
+       url: "http://192.168.4.98:8888/search?q={{ query | urlencode }}&format=json&language=en"
+       method: GET
+       timeout: 20
+   ```
+3. A script the AI can call: **Settings → Automations & scenes → Scripts → Add
+   script → ⋮ → Edit in YAML**, paste, save:
+   ```yaml
+   alias: Web search
+   description: >-
+     Search the internet. Use this when asked about current events, recent facts,
+     or anything you don't know or aren't sure about. Returns the top results.
+   fields:
+     query:
+       description: What to search for, as a short search query.
+       required: true
+       selector:
+         text:
+   sequence:
+     - action: rest_command.web_search
+       data:
+         query: "{{ query }}"
+       response_variable: search
+     - variables:
+         found: >-
+           {% set ns = namespace(items=[]) %}
+           {% for r in (search.content.results | default([]))[:5] %}
+             {% set ns.items = ns.items + [{'title': r.title, 'snippet': (r.content | default(''))[:300]}] %}
+           {% endfor %}
+           {{ {'answers': search.content.answers | default([]), 'results': ns.items} }}
+     - stop: Search done
+       response_variable: found
+   ```
+4. **Settings → Voice assistants → Expose**: expose the **Web search** script
+   to Assist. The conversation agent (your Ollama integration) must have
+   **Control Home Assistant** set to **Assist**, which lets it use exposed
+   scripts as tools. Optionally add to its instructions: "If you don't know
+   something or it may have changed recently, use the web search tool."
+
 ## Remembering things
 
 Tell him something to keep: **"Remember that my dog's name is King"**, "don't

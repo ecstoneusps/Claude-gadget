@@ -273,7 +273,7 @@ static void test_memory_store() {
     MemoryStore many;
     for (int i = 0; i < 200; ++i) many.add("note number " + std::to_string(i) + " about something");
     const std::string b = many.promptBlock(300);
-    CHECK(b.size() < 450);
+    CHECK(b.size() < 300 + 400);  // the notes that fit, plus the instructions around them
     CHECK(b.find("note number 199") != std::string::npos);
     CHECK(b.find("note number 0 ") == std::string::npos);
 }

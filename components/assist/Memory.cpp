@@ -238,9 +238,14 @@ std::string MemoryStore::promptBlock(size_t maxChars) const {
         used += it->size() + 4;
     }
     std::reverse(picked.begin(), picked.end());
-    std::string block = "[Things your owner asked you to remember (\"my\" means your owner's): ";
+    // Small models grab whatever is in front of them, so the instructions are
+    // firm: these are background, used when asked or clearly on topic, not
+    // worked into every answer (they'd mention the dog in every reply).
+    std::string block = "[Background notes about your owner, for reference only (\"my\" means your owner's): ";
     for (size_t i = 0; i < picked.size(); ++i) block += (i ? "; " : "") + picked[i];
-    block += ". Use them when they help; don't recite them unprompted.]\n";
+    block += ". Don't bring these up on your own. Use a note when your owner asks about it or the "
+             "conversation is directly about that topic; an occasional natural mention is fine, but never "
+             "work them into answers about something else.]\n";
     return block;
 }
 
