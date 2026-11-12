@@ -6,3 +6,4 @@
 
 bool proximityBegin();             // configure for maximum range; false if not found
 bool proximityRead(uint16_t* out); // latest reading, 0..2047 (higher = closer)
+bool proximityReadLux(float* lux); // ambient light in lux (same chip, just above the screen)

@@ -49,6 +49,9 @@
 #include "wifi.h"
 #include "webui.h"
 #include "photonotes.h"
+#include "hass.h"
+#include "esp_app_desc.h"
+#include "esp_timer.h"
 
 static const char* TAG = "main";
 
@@ -112,8 +115,13 @@ static void handleTouch(uint32_t now) {
         }
         return;
     }
-    if (t.isHolding()) buddy.onHold(now);
-    else if (t.wasClicked()) buddy.onTap(now);
+    if (t.isHolding()) {
+        buddy.onHold(now);
+        hassEvent("petted", now);
+    } else if (t.wasClicked()) {
+        buddy.onTap(now);
+        hassEvent("tapped", now);
+    }
 }
 
 static void handleImu(uint32_t now) {
@@ -133,7 +141,12 @@ static void handleImu(uint32_t now) {
     }
 
     const float mag = sqrtf(ax * ax + ay * ay + az * az);
-    if (fabsf(mag - 1.0f) > kShakeG) buddy.onShake(now);
+    if (fabsf(mag - 1.0f) > kShakeG) {
+        buddy.onShake(now);
+        static uint32_t lastShakeEvent = 0;
+        if (now - lastShakeEvent > 3000) hassEvent("shaken", now);
+        lastShakeEvent = now;
+    }
 
     // If the eyes look the wrong way on your unit, flip_tilt_x / flip_tilt_y in settings.txt.
     // Turned around (screen_flip), both axes point the other way.
@@ -275,6 +288,7 @@ static void handleVoice(uint32_t now) {
         switch (ev.type) {
             case VoiceEvent::WakeWord:
                 buddy.onWakeWord(now);
+                hassEvent("wake_word", now);
                 break;
             case VoiceEvent::Command:
                 if (ev.prob >= config.commandConfidence) {
@@ -671,6 +685,102 @@ static bool drawAddress(uint32_t now) {
     return true;
 }
 
+// Saves one setting to settings.txt a few seconds after the last change (so a
+// slider dragged in Home Assistant writes the card once, not twenty times).
+static void saveSettingSoon(const char* key, int value, uint32_t now) {
+    static const char* pendingKey = nullptr;
+    static int pendingValue = 0;
+    static uint32_t saveAt = 0;
+    if (key) {
+        if (pendingKey && strcmp(pendingKey, key) != 0) saveSettingSoon(nullptr, 0, now + 100000);  // flush the other one
+        pendingKey = key;
+        pendingValue = value;
+        saveAt = now + 3000;
+        if (saveAt == 0) saveAt = 1;
+        return;
+    }
+    if (!pendingKey || saveAt == 0 || (int32_t)(now - saveAt) < 0) return;
+    std::string text;
+    if (sdcardMounted() && sdcardReadFile(kSettingsFile, text) &&
+        sdcardWriteFile(kSettingsFile, configSetValue(text, pendingKey, std::to_string(pendingValue))))
+        ESP_LOGI(TAG, "saved %s = %d to settings.txt", pendingKey, pendingValue);
+    pendingKey = nullptr;
+    saveAt = 0;
+}
+
+// Home Assistant (MQTT): send what he senses, carry out what it asks.
+static void handleHass(uint32_t now, bool dimmed) {
+    HassCommand cmd;
+    while (hassTakeCommand(cmd)) {
+        switch (cmd.type) {
+            case HassCommand::Volume:
+                config.volume = cmd.value < 0 ? 0 : cmd.value > 100 ? 100 : cmd.value;
+                soundSetVolume(config.volume);
+                ESP_LOGI(TAG, "Home Assistant: volume %d%%", config.volume);
+                saveSettingSoon("volume", config.volume, now);
+                break;
+            case HassCommand::Brightness:
+                config.brightness = cmd.value < 5 ? 5 : cmd.value > 100 ? 100 : cmd.value;
+                if (!dimmed) M5.Display.setBrightness(percentTo255(config.brightness));
+                ESP_LOGI(TAG, "Home Assistant: brightness %d%%", config.brightness);
+                saveSettingSoon("brightness", config.brightness, now);
+                break;
+            case HassCommand::Mute:
+                buddy.setMuted(cmd.value != 0);
+                break;
+            case HassCommand::Say:
+                if (cmd.text.empty()) break;
+                ESP_LOGI(TAG, "Home Assistant asks him to say: \"%s\"", cmd.text.c_str());
+                if (!aiStarted.load() || !assistantSay(cmd.text))
+                    ESP_LOGW(TAG, "couldn't say it (Home Assistant's voice not connected, or he's busy talking)");
+                break;
+            case HassCommand::Photo:
+                startPhoto(false, "", false, now);
+                break;
+            case HassCommand::Sleep:
+                buddy.onCommand(VoiceCommand::GoodNight, now);
+                break;
+            case HassCommand::Wake:
+                buddy.onCommand(VoiceCommand::WakeUp, now);
+                break;
+        }
+    }
+    saveSettingSoon(nullptr, 0, now);
+
+    static uint32_t lastUpdate = 0, lastLux = 0;
+    static float lux = -1;
+    if (!hassConnected() || now - lastUpdate < 250) return;
+    lastUpdate = now;
+    if (proxOkFlag && now - lastLux > 2000) {  // the light sensor (I2C belongs to this task)
+        lastLux = now;
+        float l;
+        if (proximityReadLux(&l)) lux = l;
+    }
+    HassState st;
+    const bool radar = config.radar && radarFound();
+    st.haveRadar = radar;
+    st.atDesk = radar ? radarPresence.present() : presence.present();
+    if (radar && radarFresh(now)) {
+        const RadarReading& r = radarLatest();
+        st.distanceCm = r.someone() ? r.nearestCm() : -1;
+        static const char* const kMove[] = {"none", "moving", "still", "both"};
+        st.movement = kMove[r.state & 3];
+        st.movingEnergy = r.movingEnergy;
+        st.stillEnergy = r.stillEnergy;
+    }
+    st.lux = lux;
+    st.soundDb = voiceLevelDb();
+    st.talking = voiceSpeech();
+    st.mood = expressionName(face.expression());
+    st.awake = !buddy.isAsleep();
+    st.volume = config.volume;
+    st.brightness = config.brightness;
+    st.muted = buddy.isMuted();
+    st.battery = (int)M5.Power.getBatteryLevel();
+    st.usbMv = (int)M5.Power.getVBUSVoltage();
+    hassUpdate(st, now);
+}
+
 static void uiTask(void*) {
     const bool proxOk = config.proximity && proximityBegin();
     if (config.radar) radarBegin();
@@ -737,6 +847,7 @@ static void uiTask(void*) {
             settingsSetBool("muted", savedMuted);
         }
         handleVolumeChange(now);
+        handleHass(now, dimmed);
         memoryService();  // save notes to the SD card if they changed
         photoNotesService();  // and new photo descriptions
         switch (buddy.takeCameraRequest()) {  // "take a picture" / offline "what is this"
@@ -824,7 +935,18 @@ extern "C" void app_main(void) {
     // contiguous blocks that weren't left once the camera and models loaded.
     // Wi-Fi for the AI and the settings page. With no network saved (or none
     // working) Buddy opens his own "Buddy Setup" network for the settings page.
-    if (wifiStart(config.wifiNetworks(), config.setupHotspot)) webuiStart(kSettingsFile);
+    if (wifiStart(config.wifiNetworks(), config.setupHotspot)) {
+        webuiStart(kSettingsFile);
+        // Home Assistant sensors and controls over MQTT.
+        if (!config.mqttUrl.empty()) {
+            HassConfig hc;
+            hc.url = config.mqttUrl;
+            hc.user = config.mqttUser;
+            hc.password = config.mqttPassword;
+            hc.version = esp_app_get_description()->version;
+            hassStart(hc);
+        }
+    }
     sharedI2cBus();                       // before other tasks touch the I2C bus
     // The camera only runs if something uses it: it captures frames
     // continuously once started, even with nothing looking at them.

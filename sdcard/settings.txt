@@ -71,6 +71,13 @@ memory                       = on     # "remember that ..." notes, kept in memor
 learn                        = on     # after a chat, the AI adds lasting facts it heard to memories.txt (check them on the settings page)
 welcome_back_minutes         = 20     # say hello out loud when you come back after this long away (0 = off)
 
+# --- Home Assistant sensors and controls (MQTT, through the Mosquitto add-on) ---
+# Buddy shows up in Home Assistant as the device "Desk Buddy": at desk, light level,
+# mood..., plus volume, "say" and more. Home network only.
+mqtt_url                     =        # the broker, e.g. mqtt://192.168.1.20:1883 (Home Assistant's address)
+mqtt_user                    =        # an MQTT login (a Home Assistant user works)
+mqtt_password                =        # its password
+
 # --- Seeing ("what do you see?", "what am I holding?") ---
 # Photos go straight to a vision model in Ollama on your PC; the answer is
 # spoken through Home Assistant. Install it first: ollama pull gemma3:4b

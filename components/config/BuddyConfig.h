@@ -58,6 +58,10 @@ struct BuddyConfig {
     std::string wifiPasswordN[kExtraWifi];  // wifi_password_2, wifi_password_3
     std::string haUrl;               // http://192.168.1.20:8123 (on the home network)
     bool setupHotspot = true;        // no saved network works: open "Buddy Setup" for the settings page
+    // Home Assistant sensors and controls over MQTT (Mosquitto)
+    std::string mqttUrl;             // mqtt://192.168.4.97:1883 ("" = off)
+    std::string mqttUser;
+    std::string mqttPassword;        // never logged
     std::string haUrlAway;           // used on any other network, e.g. a Tailscale Funnel https address ("" = ha_url)
     std::string haToken;             // long-lived access token: never logged
     std::string haPipeline = "Buddy";  // the voice assistant's name in Home Assistant

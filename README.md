@@ -124,6 +124,28 @@ llama3.1/3.2 and mistral-nemo do; gemma3 doesn't).
    scripts as tools. Optionally add to its instructions: "If you don't know
    something or it may have changed recently, use the web search tool."
 
+## In Home Assistant (MQTT)
+
+With the **Mosquitto broker** add-on (and the MQTT integration) in Home
+Assistant, Buddy shows up as a device called **Desk Buddy**, entities and all,
+no YAML. Set `mqtt_url` (e.g. `mqtt://192.168.4.97:1883`, Home Assistant's
+address), `mqtt_user` and `mqtt_password` (any Home Assistant user's login works
+with the Mosquitto add-on; the "Desk Buddy" user is a good choice). Home network
+only: away from home the entities show as unavailable.
+
+| Entity | What |
+|---|---|
+| At desk | Someone at the desk (radar, or the proximity sensor without one) |
+| Distance, Movement, Movement/Stillness strength | What the radar sees |
+| Light level | Ambient light (lux), from the sensor above the screen |
+| Sound level, Someone talking | From the microphones |
+| Mood, Awake | His expression and whether he's asleep |
+| Interaction (event) | `tapped`, `petted`, `shaken`, `wake_word`: for automations |
+| Volume, Screen brightness, Mute | Controls (saved to settings.txt) |
+| Say | Type text and he says it, in his own voice (or use `text.set_value` in automations) |
+| Take a photo, Sleep, Wake up | Buttons |
+| Battery, USB voltage, Wi-Fi signal/network, Uptime, Free memory | Diagnostics |
+
 ## Remembering things
 
 Tell him something to keep: **"Remember that my dog's name is King"**, "don't

@@ -204,6 +204,16 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
         } else if ((key == "wifi_password_2" || key == "wifi_password_3")) {
             if (!val.empty() && (val.size() < 8 || val.size() > 63)) bad("must be 8-63 characters");
             else cfg.wifiPasswordN[key.back() - '2'] = val;
+        } else if (key == "mqtt_url") {
+            std::string v = val;
+            while (!v.empty() && v.back() == '/') v.pop_back();
+            if (!v.empty() && lower(v).rfind("mqtt://", 0) != 0 && lower(v).rfind("mqtts://", 0) != 0)
+                bad("must start with mqtt:// (e.g. mqtt://192.168.1.20:1883)");
+            else cfg.mqttUrl = v;
+        } else if (key == "mqtt_user") {
+            cfg.mqttUser = val;
+        } else if (key == "mqtt_password") {
+            cfg.mqttPassword = val;
         } else if (key == "setup_hotspot") {
             if (!parseBool(val, cfg.setupHotspot)) bad("must be on or off");
         } else if (key == "ha_url" || key == "ha_url_away") {
@@ -306,6 +316,13 @@ void addAiSection(std::string& t) {
     snprintf(buf, sizeof buf, "%-28s = %-6d # %s", "welcome_back_minutes", d.welcomeBackMinutes,
              "say hello out loud when you come back after this long away (0 = off)");
     add(buf);
+    add("");
+    add("# --- Home Assistant sensors and controls (MQTT, through the Mosquitto add-on) ---");
+    add("# Buddy shows up in Home Assistant as the device \"Desk Buddy\": at desk, light level,");
+    add("# mood..., plus volume, \"say\" and more. Home network only.");
+    str("mqtt_url", d.mqttUrl, "the broker, e.g. mqtt://192.168.1.20:1883 (Home Assistant's address)");
+    str("mqtt_user", d.mqttUser, "an MQTT login (a Home Assistant user works)");
+    str("mqtt_password", d.mqttPassword, "its password");
     add("");
     add("# --- Seeing (\"what do you see?\", \"what am I holding?\") ---");
     add("# Photos go straight to a vision model in Ollama on your PC; the answer is");

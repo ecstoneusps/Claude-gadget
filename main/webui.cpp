@@ -30,7 +30,7 @@ static const char* s_result = "none";  // what became of the last change: none/w
 static uint32_t nowMs() { return (uint32_t)(esp_timer_get_time() / 1000); }
 
 static bool isSecret(const std::string& key) {
-    return key == "ha_token" || key.rfind("wifi_password", 0) == 0;
+    return key == "ha_token" || key == "mqtt_password" || key.rfind("wifi_password", 0) == 0;
 }
 
 // One line of settings.txt: the setting's key and where its value is
