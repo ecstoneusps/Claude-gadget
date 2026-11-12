@@ -13,6 +13,8 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/task.h"
+#include "freertos/idf_additions.h"
 #include "mqtt_client.h"
 #include "wifi.h"
 
@@ -28,9 +30,31 @@ static std::string s_base;  // buddy/desk_buddy_a1b2c3
 
 static std::string topic(const char* leaf) { return s_base + "/" + leaf; }
 
+// Messages go out from a sender task of their own, right away. (Queuing them
+// in the MQTT client with esp_mqtt_client_enqueue only sent them when its task
+// next woke up, up to the 30 s keep-alive later, and dropped them after 30 s:
+// taps reached Home Assistant ~45 s late, or not at all.)
+struct Outgoing {
+    std::string topic, payload;
+    bool retain;
+};
+static QueueHandle_t s_outbox = nullptr;  // Outgoing*
+
+static void senderTask(void*) {
+    while (true) {
+        Outgoing* m = nullptr;
+        if (xQueueReceive(s_outbox, &m, portMAX_DELAY) != pdTRUE || !m) continue;
+        if (s_connected.load())
+            esp_mqtt_client_publish(s_mqtt, m->topic.c_str(), m->payload.data(), (int)m->payload.size(),
+                                    m->retain ? 1 : 0, m->retain);
+        delete m;
+    }
+}
+
 static void publish(const std::string& t, const std::string& payload, bool retain = false) {
-    if (!s_mqtt || !s_connected.load()) return;
-    esp_mqtt_client_enqueue(s_mqtt, t.c_str(), payload.data(), (int)payload.size(), retain ? 1 : 0, retain, true);
+    if (!s_mqtt || !s_connected.load() || !s_outbox) return;
+    auto* m = new Outgoing{t, payload, retain};
+    if (xQueueSend(s_outbox, &m, 0) != pdTRUE) delete m;  // full: Home Assistant gets the next update
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +215,12 @@ bool hassStart(const HassConfig& cfg) {
     s_node = node;
     s_base = "buddy/" + s_node;
     s_commands = xQueueCreate(8, sizeof(HassCommand*));
+    s_outbox = xQueueCreate(64, sizeof(Outgoing*));
+    if (!s_outbox || xTaskCreatePinnedToCoreWithCaps(senderTask, "mqtt_send", 4096, nullptr, 3, nullptr, 0,
+                                                     MALLOC_CAP_SPIRAM) != pdPASS) {
+        ESP_LOGW(TAG, "couldn't start the MQTT sender");
+        return false;
+    }
 
     static std::string lwt;
     lwt = topic("status");
