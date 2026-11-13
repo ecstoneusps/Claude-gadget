@@ -266,9 +266,22 @@ static void startIntentRun(const std::string& said) {
                    "[You can see through your camera. If answering needs you to look at something right now "
                    "(what's in front of you, what your owner is holding, wearing or showing, how many fingers "
                    "they hold up, how they look), reply with only the tag [look] and nothing else, and you'll "
-                   "get a photo to answer from. If they ask about a photo you took earlier, answer from its "
-                   "description below, or reply with only [photo] to look at your newest photo again.]\n") +
-               photoNotesPromptBlock() + text;
+                   "get a photo to answer from. If they ask about a photo you took earlier, reply with only "
+                   "[photo] to look at your newest photo again.]\n") +
+               text;
+    }
+    // What his photos show, only when the question is about a photo: given to
+    // every conversation, a small model kept bringing up what was in them
+    // ("nice black shirt!") in every answer.
+    {
+        const std::string q = normalizeSpeech(said);
+        if (q.find("picture") != std::string::npos || q.find("photo") != std::string::npos ||
+            q.find("pic ") != std::string::npos || q.find("snapshot") != std::string::npos) {
+            const std::string photos = photoNotesPromptBlock();
+            if (!photos.empty())
+                text = photos.substr(0, photos.size() - 2) +
+                       " Use these only to answer this question about a photo.]\n" + text;
+        }
     }
     if (!s_sawNote.empty()) {  // so "what did you just see?" works in the chat too
         text = "[What you saw when you last looked: " + s_sawNote + "]\n" + text;

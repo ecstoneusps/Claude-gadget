@@ -350,7 +350,8 @@ std::string learnPrompt(const std::vector<std::pair<std::string, std::string>>& 
         "owner, or the people and pets in their life, that would help in future conversations: names, "
         "birthdays, likes and dislikes, hobbies, plans with dates, important events. One fact per line, "
         "written the way your owner would say it, starting with \"My\" or \"I\" (for example: My dog's name is "
-        "King). Leave out anything temporary (the weather, the time, what they're doing right now), anything "
+        "King). Leave out anything temporary (the weather, the time, what they're doing right now, what they're "
+        "wearing or how they look today, what was in a photo), anything "
         "only you said, and anything already in your notes. If nothing is worth keeping, reply with just: NONE\n";
     if (!notes.empty()) {
         p += "\nAlready in your notes:\n";
