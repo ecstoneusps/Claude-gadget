@@ -64,6 +64,9 @@ bool assistantBeginTurn(bool followUp);
 void assistantAudio(const int16_t* pcm, int samples);
 void assistantEndAudio(bool heardSpeech);
 bool assistantSttDone();  // Home Assistant decided you stopped talking
+// Recording a voice sample ("learn my voice"): listen patiently (longer to
+// start, longer pauses allowed).
+bool assistantWantsLongAnswer();
 
 // "What do you see?": after a Look event (or the offline "what is this"
 // command), the main loop takes a photo and hands it over here. Takes

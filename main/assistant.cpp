@@ -63,6 +63,7 @@ static std::atomic<bool> s_voiceEnrolled{false};
 static std::atomic<bool> s_voiceStatusKnown{false};
 static TaskHandle_t s_voiceIdTask = nullptr;
 static int s_enrollLeft = 0;                   // "learn my voice": samples still to record
+static int s_enrollMisses = 0;                 // ...and answers in a row that heard nothing
 static bool s_forceFollowUp = false;           // listen again after this reply even if follow_up is off
 struct Introduced {                            // "this is my friend Sarah" / "it's me"
     SpeakerIntro::Kind kind = SpeakerIntro::None;
@@ -131,7 +132,7 @@ static std::string s_convEngine;  // the voice assistant's conversation agent
 static constexpr uint32_t kLearnAfterMs = 90000;
 static bool s_tokenRejected = false;
 
-enum class Stage { Idle, WaitRunStart, Streaming, WaitStt, WaitIntent, WaitVision };
+enum class Stage { Idle, WaitRunStart, Streaming, WaitStt, WaitIntent, WaitVision, Recording };
 static Stage s_stage = Stage::Idle;
 static int s_runId = 0;
 static int s_handlerId = -1;
@@ -770,6 +771,7 @@ static std::string speakerLine(Speaker who) {
 // follow-ups (each reply asks for the next).
 static void enrollStep() {
     const size_t len = s_turnLen.load();
+    s_enrollMisses = 0;
     if (len < 16000 * 5 / 2) {
         s_forceFollowUp = true;
         deliverReply("[thinking] That was a bit short. Say a couple more sentences, anything at all!", true);
@@ -798,6 +800,17 @@ static void enrollStep() {
     }
 }
 
+// A voice sample turn ended without any speech: ask again (twice), then give up.
+static void enrollNothingHeard() {
+    if (++s_enrollMisses < 3) {
+        s_forceFollowUp = true;
+        deliverReply("[thinking] I didn't catch that. Go ahead, I'm listening!", true);
+    } else {
+        s_enrollLeft = 0;
+        deliverReply("[sad] I couldn't hear you. Say \"learn my voice\" when you want to try again.", true);
+    }
+}
+
 static void handleHeard(const std::string& text) {
     ESP_LOGI(TAG, "heard: \"%s\"", text.c_str());
     if (normalizeSpeech(text).empty()) {
@@ -815,22 +828,6 @@ static void handleHeard(const std::string& text) {
         if (assistantBeginTurn(false)) voiceFollowUp();
         else voiceResume();
         return;
-    }
-    // Recording voice samples ("learn my voice"), as follow-ups. A new "Hey
-    // Buddy" (not a follow-up) or "stop" ends it.
-    if (s_enrollLeft > 0) {
-        const std::string n = normalizeSpeech(text);
-        if (!s_followUpTurn.load() || n == "stop" || n == "cancel" || n == "never mind") {
-            s_enrollLeft = 0;
-            ESP_LOGI(TAG, "voice recognition: learning stopped");
-            if (s_followUpTurn.load()) {
-                deliverReply("[neutral] Okay, never mind.", true);
-                return;
-            }
-        } else {
-            enrollStep();
-            return;
-        }
     }
     if (!s_cfg.voiceIdUrl.empty() && (isVoiceEnrollRequest(text) || isVoiceForgetRequest(text))) {
         const bool forget = isVoiceForgetRequest(text);
@@ -857,6 +854,7 @@ static void handleHeard(const std::string& text) {
         } else {
             ESP_LOGI(TAG, "voice recognition: learning the owner's voice");
             s_enrollLeft = 3;
+            s_enrollMisses = 0;
             s_forceFollowUp = true;
             deliverReply("[happy] Okay! I'll listen to you three times. First, tell me a little about yourself, a few "
                          "sentences.", true);
@@ -1506,13 +1504,33 @@ static void assistantTask(void*) {
             esp_websocket_client_stop(s_ws);
         }
 
-        if (s_stage == Stage::Idle && s_turnPending.exchange(false)) startSttRun();
+        if (s_stage == Stage::Idle && s_turnPending.exchange(false)) {
+            // Voice samples ("learn my voice") are only recorded here, not sent
+            // for speech-to-text: the words don't matter, and its listening
+            // could end the answer at the first pause. A new "Hey Buddy" (not a
+            // follow-up) stops the learning and is handled as usual.
+            if (s_enrollLeft > 0 && !s_followUpTurn.load()) s_enrollLeft = 0;
+            if (s_enrollLeft > 0) {
+                s_stage = Stage::Recording;
+                s_deadline = nowMs() + 40000;
+            } else {
+                startSttRun();
+            }
+        }
+        if (s_stage == Stage::Recording && s_audioEnded.load()) {
+            const bool heard = s_heardSpeech.load();
+            finishTurn();
+            if (heard) enrollStep();
+            else enrollNothingHeard();
+        }
         if (s_cfg.learn && s_cfg.memory && !s_chatLog.empty() && s_learnId == 0 && s_stage == Stage::Idle &&
             !s_turnActive.load() && s_ready.load() && nowMs() - s_lastChatMs > kLearnAfterMs)
             startLearning();
         if (s_stage == Stage::Streaming) pumpAudio();
         if (s_stage != Stage::Idle && (int32_t)(nowMs() - s_deadline) > 0) {
-            failTurn(s_stage == Stage::WaitVision ? "the vision model took too long (through Home Assistant)"
+            if (s_stage == Stage::Recording) s_enrollLeft = 0;
+            failTurn(s_stage == Stage::Recording    ? "recording a voice sample took too long"
+                     : s_stage == Stage::WaitVision ? "the vision model took too long (through Home Assistant)"
                      : s_stage == Stage::WaitIntent ? "the AI took too long to answer"
                      : s_stage == Stage::WaitStt  ? "speech-to-text took too long"
                                                   : "Home Assistant didn't respond");
@@ -1663,6 +1681,7 @@ void assistantEndAudio(bool heardSpeech) {
 }
 
 bool assistantSttDone() { return s_sttDone.load(); }
+bool assistantWantsLongAnswer() { return s_enrollLeft > 0; }
 
 bool assistantCanSee() { return !s_cfg.visionUrl.empty() && s_ready.load(); }
 

@@ -148,13 +148,19 @@ static void detectTask(void*) {
                 lastSpeech = now;
             }
             const bool sttDone = assistantSttDone();  // Home Assistant heard you stop
-            const bool done = sttDone || (heard && now - lastSpeech > kEndSilenceMs) ||
-                              (!heard && now - since > (followUp ? kFollowUpStartMs : kStartTalkingMs)) ||
-                              now - since > kMaxUtteranceMs;
+            // A voice sample for "learn my voice": more time to start, and
+            // pauses while thinking don't end it.
+            const bool patient = assistantWantsLongAnswer();
+            const uint32_t endSilence = patient ? 2000 : kEndSilenceMs;
+            const uint32_t startWindow = patient ? 10000 : followUp ? kFollowUpStartMs : kStartTalkingMs;
+            const bool done = sttDone || (heard && now - lastSpeech > endSilence) ||
+                              (!heard && now - since > startWindow) || now - since > kMaxUtteranceMs;
             if (done) {
                 const bool spoke = heard || sttDone;
                 assistantEndAudio(spoke);
-                if (spoke) {
+                // A voice sample with nothing in it: the assistant asks again,
+                // so wait for it to hand back (as after an answer).
+                if (spoke || patient) {
                     mode = Mode::Busy;
                     since = now;
                 } else {
