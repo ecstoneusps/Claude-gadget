@@ -124,6 +124,30 @@ llama3.1/3.2 and mistral-nemo do; gemma3 doesn't).
    scripts as tools. Optionally add to its instructions: "If you don't know
    something or it may have changed recently, use the web search tool."
 
+## Knowing who's talking (optional)
+
+Buddy can tell **you** from **everyone else** by voice, so he uses your name
+with you and not with your guests. The matching runs in a small service on
+your PC ([tools/voiceid](tools/voiceid), CPU only):
+
+    docker build -t buddy-voiceid https://github.com/ecstoneusps/Claude-gadget.git#face-engine-cores3:tools/voiceid
+    docker run -d --name buddy-voiceid --restart unless-stopped -p 8095:8095 -v buddy-voiceid:/data buddy-voiceid
+
+Set `voice_id_url = http://<the PC's address>:8095`, then say **"Hey Buddy,
+learn my voice"** and answer his three questions (a few sentences each). From
+then on each question's audio is checked while Home Assistant is turning it into
+text, and the AI is told "your owner is talking", "a guest is talking" or "can't
+tell" (then he avoids names). The log shows `voice: owner (score 0.62)`.
+
+- **"This is my friend Sarah"** (or "my name is Sarah") tells him who's talking
+  for the rest of that conversation; **"it's me"** switches back to you.
+- **"Forget my voice"** deletes your voiceprint (only your voice can do that, or
+  learn it again). Your voiceprint is numbers describing your voice, kept on the
+  PC, not a recording.
+- What guests say isn't saved as facts about you.
+- Away from home it isn't used (the service is on the home network): he avoids
+  guessing.
+
 ## In Home Assistant (MQTT)
 
 With the **Mosquitto broker** add-on (and the MQTT integration) in Home

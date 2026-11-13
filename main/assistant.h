@@ -29,6 +29,7 @@ struct AssistantConfig {
     std::string visionModel;  // e.g. gemma3:4b
     bool memory = true;       // "remember that ...": notes on the SD card, given to the AI
     bool learn = true;        // after a chat, the AI picks out lasting facts and adds them to the notes
+    std::string voiceIdUrl;   // voice recognition service ("" = off): owner or someone else?
 };
 
 // What the UI should show, posted to the queue given to assistantStart().

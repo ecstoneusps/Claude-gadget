@@ -69,6 +69,7 @@ struct BuddyConfig {
     bool followUp = true;            // keep listening after an answer, without "Hey Buddy"
     bool memory = true;              // "remember that ...": notes in memories.txt, given to the AI
     bool learn = true;               // after a chat, the AI adds lasting facts it heard to memories.txt
+    std::string voiceIdUrl;          // voice recognition service on the PC ("" = off): is it the owner talking?
     int welcomeBackMinutes = 20;     // say hello out loud when you come back after this long away (0 = off)
 
     // "What do you see?": photos go straight to a vision model in Ollama

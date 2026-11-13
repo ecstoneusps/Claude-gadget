@@ -69,6 +69,7 @@ conversation                 = on     # off = only the built-in commands
 follow_up                    = on     # keep listening after an answer, no "Hey Buddy" needed
 memory                       = on     # "remember that ..." notes, kept in memories.txt and told to the AI
 learn                        = on     # after a chat, the AI adds lasting facts it heard to memories.txt (check them on the settings page)
+voice_id_url                 =        # optional: voice recognition on the PC (tools/voiceid), e.g. http://192.168.1.30:8095
 welcome_back_minutes         = 20     # say hello out loud when you come back after this long away (0 = off)
 
 # --- Home Assistant sensors and controls (MQTT, through the Mosquitto add-on) ---

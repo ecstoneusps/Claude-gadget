@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <vector>
 
 // Text handling for conversations with the AI (through Home Assistant).
 // Portable, so it is unit-tested on a PC.
@@ -46,3 +47,17 @@ bool isPhotoRequest(const std::string& heard);
 // a few words long so a reply isn't chopped into tiny pieces. A very long
 // sentence is cut at a comma or space instead.
 size_t sentenceEnd(const std::string& text, size_t from);
+
+// Who's talking: "Hey Buddy, learn my voice" / "forget my voice", and saying
+// who you are: "this is my friend Sarah", "my name is Sarah", "it's me".
+bool isVoiceEnrollRequest(const std::string& heard);
+bool isVoiceForgetRequest(const std::string& heard);
+struct SpeakerIntro {
+    enum Kind { None, Owner, Guest } kind = None;
+    std::string name;  // Guest: their name ("Sarah"); may be empty
+};
+// `ownerName`: the owner's first name if known ("" if not), so "it's Eric" and
+// "my name is Eric" count as the owner.
+SpeakerIntro parseSpeakerIntro(const std::string& heard, const std::string& ownerName);
+// "my name is Eric" (or "I'm Eric") in the notes -> "Eric"; "" if none.
+std::string ownerNameFromNotes(const std::vector<std::string>& notes);

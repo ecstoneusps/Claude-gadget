@@ -352,13 +352,15 @@ std::string learnPrompt(const std::vector<std::pair<std::string, std::string>>& 
         "written the way your owner would say it, starting with \"My\" or \"I\" (for example: My dog's name is "
         "King). Leave out anything temporary (the weather, the time, what they're doing right now, what they're "
         "wearing or how they look today, what was in a photo), anything "
-        "only you said, and anything already in your notes. If nothing is worth keeping, reply with just: NONE\n";
+        "only you said, anything a guest said about themselves (facts about guests aren't facts about your owner), "
+        "and anything already in your notes. If nothing is worth keeping, reply with just: NONE\n";
     if (!notes.empty()) {
         p += "\nAlready in your notes:\n";
         for (const auto& n : notes) p += "- " + n + "\n";
     }
     p += "\nConversation:\n";
-    for (const auto& [who, said] : transcript) p += (who == "owner" ? "Owner: " : "Buddy: ") + said + "\n";
+    for (const auto& [who, said] : transcript)
+        p += (who == "owner" ? "Owner: " : who == "guest" ? "Guest (not your owner): " : "Buddy: ") + said + "\n";
     return p;
 }
 

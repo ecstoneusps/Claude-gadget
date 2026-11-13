@@ -47,6 +47,29 @@ static std::atomic<bool> s_ready{false};       // logged in and the voice assist
 static std::atomic<bool> s_turnActive{false};
 static std::atomic<bool> s_turnPending{false};
 static std::atomic<bool> s_followUpTurn{false};
+
+// Who's talking (voice_id_url): each question's audio is kept and sent to a
+// voice recognition service on the PC, which says whether it's the owner.
+// That runs while Home Assistant turns the speech into text, so it costs
+// almost no time. The AI is then told who is talking.
+enum class Speaker : int { Unknown = 0, Owner, Other, Unsure };
+static int16_t* s_turnPcm = nullptr;
+static constexpr size_t kTurnMaxSamples = 16000 * 12;  // 12 s
+static std::atomic<size_t> s_turnLen{0};
+static std::atomic<uint32_t> s_turnGen{0};
+static std::atomic<int> s_speaker{0};          // Speaker, for turn s_speakerGen
+static std::atomic<uint32_t> s_speakerGen{0};
+static std::atomic<bool> s_voiceEnrolled{false};
+static std::atomic<bool> s_voiceStatusKnown{false};
+static TaskHandle_t s_voiceIdTask = nullptr;
+static int s_enrollLeft = 0;                   // "learn my voice": samples still to record
+static bool s_forceFollowUp = false;           // listen again after this reply even if follow_up is off
+struct Introduced {                            // "this is my friend Sarah" / "it's me"
+    SpeakerIntro::Kind kind = SpeakerIntro::None;
+    std::string name;
+    uint32_t until = 0;
+};
+static Introduced s_introduced;
 static std::atomic<bool> s_accepting{false};   // voice.cpp may push audio
 static std::atomic<bool> s_audioEnded{false};
 static std::atomic<bool> s_heardSpeech{false};
@@ -249,8 +272,13 @@ static void startSttRun() {
 // a conversation; after a change, again with the next question).
 static bool s_notesChanged = false;
 
+static Speaker currentSpeaker();
+static std::string speakerLine(Speaker who);
+
 static void startIntentRun(const std::string& said) {
-    if (s_chatLog.size() < 40) s_chatLog.emplace_back("owner", said);
+    const Speaker who = currentSpeaker();
+    if (s_introduced.kind != SpeakerIntro::None) s_introduced.until = nowMs() + kConversationMs;  // still them
+    if (s_chatLog.size() < 40) s_chatLog.emplace_back(who == Speaker::Other ? "guest" : "owner", said);
     s_lastChatMs = nowMs();
     const bool newConversation = s_conversationId.empty() || (int32_t)(s_conversationUntil - nowMs()) <= 0;
     s_lastQuestion = said;
@@ -283,6 +311,7 @@ static void startIntentRun(const std::string& said) {
                        " Use these only to answer this question about a photo.]\n" + text;
         }
     }
+    text = speakerLine(who) + text;
     if (!s_sawNote.empty()) {  // so "what did you just see?" works in the chat too
         text = "[What you saw when you last looked: " + s_sawNote + "]\n" + text;
         s_sawNote.clear();
@@ -638,6 +667,137 @@ static void handleMemory(const MemoryCommand& mc) {
 }
 
 // You said something: run it as a built-in command, or ask the AI.
+// ---- Voice recognition service (tools/voiceid) -----------------------------
+
+static bool voiceIdOn() { return !s_cfg.voiceIdUrl.empty() && !awayFromHome(); }
+
+// method: "GET" or "POST"; body may be null. Returns the HTTP status (0: unreachable).
+static int voiceIdRequest(const char* method, const char* path, const void* body, size_t len, std::string* resp) {
+    const std::string url = s_cfg.voiceIdUrl + path;
+    esp_http_client_config_t hc = {};
+    hc.url = url.c_str();
+    hc.method = strcmp(method, "GET") == 0 ? HTTP_METHOD_GET : HTTP_METHOD_POST;
+    hc.timeout_ms = 15000;
+    hc.buffer_size = 1024;
+    esp_http_client_handle_t http = esp_http_client_init(&hc);
+    esp_http_client_set_header(http, "Content-Type", "application/octet-stream");
+    int status = 0;
+    if (esp_http_client_open(http, body ? (int)len : 0) == ESP_OK &&
+        (!body || esp_http_client_write(http, (const char*)body, (int)len) == (int)len)) {
+        esp_http_client_fetch_headers(http);
+        char chunk[256];
+        int n;
+        while ((n = esp_http_client_read(http, chunk, sizeof chunk)) > 0)
+            if (resp && resp->size() < 2048) resp->append(chunk, n);
+        status = esp_http_client_get_status_code(http);
+    }
+    esp_http_client_cleanup(http);
+    return status;
+}
+
+static void voiceIdCheckStatus() {
+    std::string resp;
+    if (voiceIdRequest("GET", "/status", nullptr, 0, &resp) != 200) return;
+    cJSON* j = cJSON_Parse(resp.c_str());
+    const bool enrolled = j && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j, "enrolled"));
+    cJSON_Delete(j);
+    s_voiceEnrolled.store(enrolled);
+    if (!s_voiceStatusKnown.exchange(true))
+        ESP_LOGI(TAG, "voice recognition ready (%s)", enrolled ? "knows your voice" : "say \"learn my voice\" to teach it");
+}
+
+// Runs each question's audio past the service (woken by assistantEndAudio).
+static void voiceIdTask(void*) {
+    while (!voiceIdOn() || !wifiConnected()) vTaskDelay(pdMS_TO_TICKS(2000));
+    for (int tries = 0; tries < 30 && !s_voiceStatusKnown.load(); ++tries) {
+        voiceIdCheckStatus();
+        if (!s_voiceStatusKnown.load()) vTaskDelay(pdMS_TO_TICKS(60000));
+    }
+    if (!s_voiceStatusKnown.load()) ESP_LOGW(TAG, "can't reach voice recognition at %s", s_cfg.voiceIdUrl.c_str());
+    while (true) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        const uint32_t gen = s_turnGen.load();
+        const size_t len = s_turnLen.load();
+        Speaker who = Speaker::Unsure;
+        std::string resp;
+        if (voiceIdOn() && len >= 16000 &&
+            voiceIdRequest("POST", "/identify", s_turnPcm, len * sizeof(int16_t), &resp) == 200) {
+            cJSON* j = cJSON_Parse(resp.c_str());
+            const char* d = jstr(j, "decision");
+            const cJSON* score = cJSON_GetObjectItemCaseSensitive(j, "score");
+            if (d && strcmp(d, "owner") == 0) who = Speaker::Owner;
+            else if (d && strcmp(d, "other") == 0) who = Speaker::Other;
+            ESP_LOGI(TAG, "voice: %s (score %.2f, %.1f s)", d ? d : "?", cJSON_IsNumber(score) ? score->valuedouble : 0.0,
+                     len / 16000.0);
+            cJSON_Delete(j);
+        }
+        s_speaker.store((int)who);
+        s_speakerGen.store(gen);
+    }
+}
+
+// Who's talking right now, for the AI ("" when voice recognition isn't in use
+// and nobody said who they are).
+static Speaker currentSpeaker() {
+    if (s_introduced.kind != SpeakerIntro::None && (int32_t)(s_introduced.until - nowMs()) > 0)
+        return s_introduced.kind == SpeakerIntro::Owner ? Speaker::Owner : Speaker::Other;
+    s_introduced.kind = SpeakerIntro::None;
+    if (!voiceIdOn() || !s_voiceEnrolled.load()) return Speaker::Unknown;
+    // The answer is usually in before the speech-to-text; wait a moment if not.
+    for (int waited = 0; s_speakerGen.load() != s_turnGen.load() && waited < 1500; waited += 20)
+        vTaskDelay(pdMS_TO_TICKS(20));
+    return s_speakerGen.load() == s_turnGen.load() ? (Speaker)s_speaker.load() : Speaker::Unsure;
+}
+
+static std::string speakerLine(Speaker who) {
+    switch (who) {
+        case Speaker::Owner:
+            return "[Speaking now: your owner.]\n";
+        case Speaker::Other:
+            if (s_introduced.kind == SpeakerIntro::Guest && !s_introduced.name.empty())
+                return "[Speaking now: " + s_introduced.name + ", a guest, not your owner. Call them " +
+                       s_introduced.name + ", never by your owner's name.]\n";
+            return "[Speaking now: someone who is not your owner (a guest). Don't call them by your owner's name; "
+                   "you don't know their name unless they tell you.]\n";
+        case Speaker::Unsure:
+            return "[You can't tell who is speaking this time, so don't call them by name.]\n";
+        default:
+            return "";
+    }
+}
+
+// "learn my voice": three samples of a few sentences each, recorded as
+// follow-ups (each reply asks for the next).
+static void enrollStep() {
+    const size_t len = s_turnLen.load();
+    if (len < 16000 * 5 / 2) {
+        s_forceFollowUp = true;
+        deliverReply("[thinking] That was a bit short. Say a couple more sentences, anything at all!", true);
+        return;
+    }
+    std::string resp;
+    const int status = voiceIdRequest("POST", "/enroll", s_turnPcm, len * sizeof(int16_t), &resp);
+    if (status != 200) {
+        s_enrollLeft = 0;
+        ESP_LOGW(TAG, "voice recognition: enroll failed (HTTP %d) %.120s", status, resp.c_str());
+        deliverReply("[confused] Hmm, I couldn't reach my voice helper on the PC. Is it running?", true);
+        return;
+    }
+    s_voiceEnrolled.store(true);
+    --s_enrollLeft;
+    ESP_LOGI(TAG, "voice recognition: sample recorded (%.1f s), %d to go", len / 16000.0, s_enrollLeft);
+    if (s_enrollLeft == 2) {
+        s_forceFollowUp = true;
+        deliverReply("[happy] Got it! Two more. Now tell me about your favorite food.", true);
+    } else if (s_enrollLeft == 1) {
+        s_forceFollowUp = true;
+        deliverReply("[happy] Great! Last one: tell me what you did today.", true);
+    } else {
+        deliverReply("[laughing] All done! I'll know your voice from now on, and I won't mix you up with anyone else.",
+                     true);
+    }
+}
+
 static void handleHeard(const std::string& text) {
     ESP_LOGI(TAG, "heard: \"%s\"", text.c_str());
     if (normalizeSpeech(text).empty()) {
@@ -655,6 +815,64 @@ static void handleHeard(const std::string& text) {
         if (assistantBeginTurn(false)) voiceFollowUp();
         else voiceResume();
         return;
+    }
+    // Recording voice samples ("learn my voice"), as follow-ups. A new "Hey
+    // Buddy" (not a follow-up) or "stop" ends it.
+    if (s_enrollLeft > 0) {
+        const std::string n = normalizeSpeech(text);
+        if (!s_followUpTurn.load() || n == "stop" || n == "cancel" || n == "never mind") {
+            s_enrollLeft = 0;
+            ESP_LOGI(TAG, "voice recognition: learning stopped");
+            if (s_followUpTurn.load()) {
+                deliverReply("[neutral] Okay, never mind.", true);
+                return;
+            }
+        } else {
+            enrollStep();
+            return;
+        }
+    }
+    if (!s_cfg.voiceIdUrl.empty() && (isVoiceEnrollRequest(text) || isVoiceForgetRequest(text))) {
+        const bool forget = isVoiceForgetRequest(text);
+        if (awayFromHome()) {
+            deliverReply("[sad] My voice helper is at home, so let's do that when we're back.", true);
+            return;
+        }
+        // Only the owner can change it: once a voice is known, it must be theirs.
+        if (s_voiceEnrolled.load() && currentSpeaker() != Speaker::Owner) {
+            ESP_LOGI(TAG, "voice recognition: not the owner's voice; not changing it");
+            deliverReply("[thinking] Hmm, only my owner can change that. If that's you, try again somewhere quiet!", true);
+            return;
+        }
+        std::string resp;
+        if (voiceIdRequest("POST", "/reset", nullptr, 0, &resp) != 200) {
+            deliverReply("[confused] Hmm, I couldn't reach my voice helper on the PC. Is it running?", true);
+            return;
+        }
+        s_voiceEnrolled.store(false);
+        s_voiceStatusKnown.store(true);
+        if (forget) {
+            ESP_LOGI(TAG, "voice recognition: owner's voice forgotten");
+            deliverReply("[sad] Okay, I forgot your voice. Say \"learn my voice\" if you want me to learn it again.", true);
+        } else {
+            ESP_LOGI(TAG, "voice recognition: learning the owner's voice");
+            s_enrollLeft = 3;
+            s_forceFollowUp = true;
+            deliverReply("[happy] Okay! I'll listen to you three times. First, tell me a little about yourself, a few "
+                         "sentences.", true);
+        }
+        return;
+    }
+    // "This is my friend Sarah" / "it's me": who's talking, for this conversation.
+    {
+        const SpeakerIntro intro = parseSpeakerIntro(text, ownerNameFromNotes(memoryNotes()));
+        if (intro.kind != SpeakerIntro::None) {
+            s_introduced.kind = intro.kind;
+            s_introduced.name = intro.name;
+            s_introduced.until = nowMs() + kConversationMs;
+            ESP_LOGI(TAG, "speaker: %s", intro.kind == SpeakerIntro::Owner ? "the owner (they said so)"
+                                                                             : ("a guest: " + intro.name).c_str());
+        }
     }
     // "Remember that ...", "forget that": notes on the SD card.
     if (s_cfg.memory) {
@@ -756,7 +974,9 @@ static void deliverReply(const std::string& reply, bool micsWaiting) {
     if (spoke || !anything) post(AssistEvent::Done);  // (a failure already showed confusion)
     s_turnActive.store(false);
     if (!micsWaiting) return;
-    if (spoke && s_cfg.followUp && s_ready.load() && assistantBeginTurn(true)) {
+    const bool listenAgain = s_cfg.followUp || s_forceFollowUp;
+    s_forceFollowUp = false;
+    if (spoke && listenAgain && s_ready.load() && assistantBeginTurn(true)) {
         voiceFollowUp();
     } else {
         voiceResume();
@@ -1379,6 +1599,12 @@ bool assistantStart(const AssistantConfig& cfg, QueueHandle_t events) {
     // Stack in PSRAM: internal RAM is scarce, and this task never touches flash.
     // Priority 5, above the UI (4): otherwise fetching a reply only ran in the
     // UI's short pauses, which made replies slow and starved the idle task.
+    if (!s_cfg.voiceIdUrl.empty()) {
+        s_turnPcm = (int16_t*)heap_caps_malloc(kTurnMaxSamples * sizeof(int16_t), MALLOC_CAP_SPIRAM);
+        if (!s_turnPcm || xTaskCreatePinnedToCoreWithCaps(voiceIdTask, "voiceid", 6144, nullptr, 4, &s_voiceIdTask, 1,
+                                                          MALLOC_CAP_SPIRAM) != pdPASS)
+            ESP_LOGW(TAG, "couldn't start voice recognition");
+    }
     s_describeQ = xQueueCreate(3, sizeof(DescribeJob));
     if (!s_describeQ || xTaskCreatePinnedToCoreWithCaps(describerTask, "describer", 8192, nullptr, 2, nullptr, 1,
                                                         MALLOC_CAP_SPIRAM) != pdPASS)
@@ -1401,6 +1627,8 @@ bool assistantAvailable() { return s_ready.load() && !s_turnActive.load(); }
 const char* assistantStatus() { return s_status.load(); }
 
 bool assistantBeginTurn(bool followUp) {
+    s_turnLen.store(0);
+    ++s_turnGen;
     if (!s_ready.load()) return false;
     bool expected = false;
     if (!s_turnActive.compare_exchange_strong(expected, true)) return false;
@@ -1414,11 +1642,21 @@ bool assistantBeginTurn(bool followUp) {
 }
 
 void assistantAudio(const int16_t* pcm, int samples) {
+    if (s_turnPcm && s_accepting.load()) {  // a copy for voice recognition
+        const size_t have = s_turnLen.load();
+        const size_t n = std::min((size_t)samples, kTurnMaxSamples - have);
+        if (n) {
+            memcpy(s_turnPcm + have, pcm, n * sizeof(int16_t));
+            s_turnLen.store(have + n);
+        }
+    }
     if (!s_accepting.load()) return;
     xStreamBufferSend(s_audio, pcm, samples * sizeof(int16_t), 0);  // drops if Home Assistant is far behind
 }
 
 void assistantEndAudio(bool heardSpeech) {
+    // Who was that? (Not while recording voice samples, which go to /enroll instead.)
+    if (heardSpeech && s_voiceIdTask && s_enrollLeft == 0 && s_voiceEnrolled.load()) xTaskNotifyGive(s_voiceIdTask);
     s_heardSpeech.store(heardSpeech);
     s_audioEnded.store(true);
     if (heardSpeech) post(AssistEvent::Thinking);

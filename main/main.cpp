@@ -381,6 +381,7 @@ static void voiceInitTask(void*) {
         ac.visionModel = config.visionModel;
         ac.memory = config.memory;
         ac.learn = config.learn;
+        ac.voiceIdUrl = config.voiceIdUrl;
         aiStarted.store(assistantStart(ac, assistEvents));
     }
     vTaskDelete(nullptr);

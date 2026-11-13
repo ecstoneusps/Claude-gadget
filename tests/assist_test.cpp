@@ -325,6 +325,7 @@ static void test_learned_facts() {
     CHECK(p.find("Owner: I got a new puppy named Max") != std::string::npos);
     CHECK(p.find("Buddy: Aww, I love Max!") != std::string::npos);
     CHECK(p.find("- My dog's name is King") != std::string::npos);
+    CHECK(learnPrompt({{"guest", "I have a cat"}}, {}).find("Guest (not your owner): I have a cat") != std::string::npos);
 }
 
 static void test_third_person() {
@@ -345,6 +346,32 @@ static void test_third_person() {
     const std::string b = m.promptBlock();
     CHECK(b.find("Your owner's dog's name is King") != std::string::npos);
     CHECK(b.find("\"your\" or \"yours\" means you, Buddy") != std::string::npos);
+}
+
+static void test_speaker_intro() {
+    CHECK(isVoiceEnrollRequest("Hey Buddy, learn my voice"));
+    CHECK(isVoiceEnrollRequest("can you learn what I sound like?"));
+    CHECK(!isVoiceEnrollRequest("what's my voice like"));
+    CHECK(isVoiceForgetRequest("forget my voice please"));
+    auto g = parseSpeakerIntro("Hey Buddy, this is my friend Sarah!", "Eric");
+    CHECK(g.kind == SpeakerIntro::Guest && g.name == "Sarah");
+    g = parseSpeakerIntro("this is Tom", "Eric");
+    CHECK(g.kind == SpeakerIntro::Guest && g.name == "Tom");
+    g = parseSpeakerIntro("My name is anna.", "Eric");
+    CHECK(g.kind == SpeakerIntro::Guest && g.name == "Anna");
+    g = parseSpeakerIntro("I'm Sarah", "Eric");
+    CHECK(g.kind == SpeakerIntro::Guest && g.name == "Sarah");
+    CHECK(parseSpeakerIntro("I'm tired", "Eric").kind == SpeakerIntro::None);
+    CHECK(parseSpeakerIntro("I'm going to the store later", "Eric").kind == SpeakerIntro::None);
+    CHECK(parseSpeakerIntro("this is great", "Eric").kind == SpeakerIntro::None);
+    CHECK(parseSpeakerIntro("this is the best day", "Eric").kind == SpeakerIntro::None);
+    CHECK(parseSpeakerIntro("It's me again", "Eric").kind == SpeakerIntro::Owner);
+    CHECK(parseSpeakerIntro("it's Eric", "Eric").kind == SpeakerIntro::Owner);
+    CHECK(parseSpeakerIntro("this is Eric", "Eric").kind == SpeakerIntro::Owner);
+    CHECK(parseSpeakerIntro("it's raining", "Eric").kind == SpeakerIntro::None);
+    CHECK(parseSpeakerIntro("what's the weather", "Eric").kind == SpeakerIntro::None);
+    CHECK_EQ(ownerNameFromNotes({"my dog's name is King", "My name is Eric"}), "Eric");
+    CHECK_EQ(ownerNameFromNotes({"my dog's name is King"}), "");
 }
 
 int main() {
@@ -369,6 +396,7 @@ int main() {
     test_sentence_end();
     test_learned_facts();
     test_third_person();
+    test_speaker_intro();
     if (failures) {
         printf("assist tests: %d failure(s)\n", failures);
         return 1;

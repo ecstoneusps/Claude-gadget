@@ -243,3 +243,121 @@ size_t sentenceEnd(const std::string& text, size_t from) {
     }
     return std::string::npos;
 }
+
+bool isVoiceEnrollRequest(const std::string& heard) {
+    const std::string h = " " + normalizeSpeech(heard) + " ";
+    for (const char* p : {" learn my voice ", " remember my voice ", " learn what i sound like ", " learn how i sound ",
+                          " recognize my voice ", " recognise my voice ", " get to know my voice "})
+        if (h.find(p) != std::string::npos) return true;
+    return false;
+}
+
+bool isVoiceForgetRequest(const std::string& heard) {
+    const std::string h = " " + normalizeSpeech(heard) + " ";
+    return h.find(" forget my voice ") != std::string::npos || h.find(" forget what i sound like ") != std::string::npos;
+}
+
+namespace {
+std::vector<std::string> wordsOf(const std::string& text) {
+    std::vector<std::string> out;
+    std::string w;
+    for (char c : text) {
+        if (isalpha((unsigned char)c) || c == '\'') {
+            w += c;
+        } else if (!w.empty()) {
+            out.push_back(w);
+            w.clear();
+        }
+    }
+    if (!w.empty()) out.push_back(w);
+    return out;
+}
+
+std::string lowerWord(std::string w) {
+    std::string out;
+    for (char c : w)
+        if (c != '\'') out += (char)tolower((unsigned char)c);
+    return out;
+}
+
+// Words that follow "this is" / "my name is" but aren't names.
+bool notAName(const std::string& lw) {
+    static const char* const kNot[] = {
+        "a", "an", "the", "my", "your", "his", "her", "our", "their", "it", "that", "this", "so", "very", "really",
+        "just", "not", "going", "about", "what", "how", "why", "where", "when", "great", "awesome", "cool", "fun",
+        "crazy", "weird", "amazing", "nice", "good", "bad", "hard", "easy", "funny", "silly", "me", "him", "us",
+        "them", "too", "all", "be", "is", "was", "getting", "taking", "fine", "ok", "okay", "new", "old", "here",
+        "there", "now", "tired", "back", "done", "ready", "sure", "sorry", "happy", "sad", "busy"};
+    for (const char* n : kNot)
+        if (lw == n) return true;
+    return lw.size() < 2;
+}
+
+std::string capitalized(const std::string& w) {
+    std::string out;
+    for (char c : w)
+        if (c != '\'') out += out.empty() ? (char)toupper((unsigned char)c) : (char)tolower((unsigned char)c);
+    return out;
+}
+}  // namespace
+
+SpeakerIntro parseSpeakerIntro(const std::string& heard, const std::string& ownerName) {
+    SpeakerIntro r;
+    const auto w = wordsOf(heard);
+    std::vector<std::string> l;
+    for (const auto& x : w) l.push_back(lowerWord(x));
+    const std::string owner = lowerWord(ownerName);
+    // Skip a greeting or the wake word at the start: "hey buddy, this is Sarah".
+    size_t i = 0;
+    while (i < l.size() && (l[i] == "hey" || l[i] == "hi" || l[i] == "hello" || l[i] == "buddy" || l[i] == "ok" ||
+                            l[i] == "okay" || l[i] == "so" || l[i] == "well"))
+        ++i;
+    auto at = [&](size_t k, const char* word) { return k < l.size() && l[k] == word; };
+    // "it's me", "it's me again", "it's just me", "it's Eric".
+    if (at(i, "its") || (at(i, "it") && at(i + 1, "is"))) {
+        const size_t k = at(i, "its") ? i + 1 : i + 2;
+        size_t m = at(k, "just") ? k + 1 : k;
+        if (at(m, "me") && m + 2 >= l.size()) {
+            r.kind = SpeakerIntro::Owner;
+            return r;
+        }
+        if (!owner.empty() && at(m, owner.c_str())) {
+            r.kind = SpeakerIntro::Owner;
+            return r;
+        }
+        return r;
+    }
+    // "this is (my friend|my wife|...) Sarah", "my name is Sarah", "call me Sarah", "i'm Sarah" (alone).
+    size_t name = l.size();
+    if (at(i, "this") && at(i + 1, "is")) {
+        size_t k = i + 2;
+        if (at(k, "my") && k + 2 < l.size() && !notAName(l[k + 2])) k += 2;  // "my friend Sarah", "my sister Anna"
+        name = k;
+    } else if (at(i, "my") && at(i + 1, "name") && at(i + 2, "is")) {
+        name = i + 3;
+    } else if (at(i, "call") && at(i + 1, "me")) {
+        name = i + 2;
+    } else if ((at(i, "im") || (at(i, "i") && at(i + 1, "am"))) && l.size() <= i + 3) {
+        name = at(i, "im") ? i + 1 : i + 2;  // only short ones: "I'm Sarah", not "I'm tired of this"
+    }
+    if (name >= l.size() || notAName(l[name])) return r;
+    if (!owner.empty() && l[name] == owner) {
+        r.kind = SpeakerIntro::Owner;
+        return r;
+    }
+    r.kind = SpeakerIntro::Guest;
+    r.name = capitalized(w[name]);
+    return r;
+}
+
+std::string ownerNameFromNotes(const std::vector<std::string>& notes) {
+    for (const auto& n : notes) {
+        const auto w = wordsOf(n);
+        for (size_t i = 0; i + 3 < w.size(); ++i) {
+            if (lowerWord(w[i]) == "my" && lowerWord(w[i + 1]) == "name" &&
+                lowerWord(w[i + 2]) == "is" && !notAName(lowerWord(w[i + 3])))
+                return capitalized(w[i + 3]);
+        }
+    }
+    return "";
+}
