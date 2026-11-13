@@ -51,8 +51,13 @@ jobs:
             echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # esptool v5 wants --flash-mode etc.; ESP-IDF 5.4 still writes the old
+      # underscore spelling (which only gives deprecation warnings, for now).
+      - name: Modern esptool option names in flash_args
+        run: sudo sed -i 's/--flash_mode/--flash-mode/; s/--flash_freq/--flash-freq/; s/--flash_size/--flash-size/' build/flash_args && cat build/flash_args
+
       # Everything needed to flash without building:
-      #   cd <unzipped folder>/build && python -m esptool --chip esp32s3 write_flash @flash_args
+      #   cd <unzipped folder>/build && python -m esptool --chip esp32s3 write-flash @flash_args
       - name: Upload firmware
         uses: actions/upload-artifact@v7.0.2
         with:
