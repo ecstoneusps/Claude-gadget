@@ -143,7 +143,10 @@ static void detectTask(void*) {
 
         if (mode == Mode::Stream) {
             assistantAudio(res->data, res->data_size / (int)sizeof(int16_t));
-            if (speech) {
+            // Recording a voice sample: the first 0.8 s is the echo of Buddy's
+            // own question in the room, not the answer (it ended samples early).
+            const bool echoTime = assistantWantsLongAnswer() && now - since < 800;
+            if (speech && !echoTime) {
                 heard = true;
                 lastSpeech = now;
             }

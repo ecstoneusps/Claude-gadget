@@ -64,6 +64,7 @@ static std::atomic<bool> s_voiceStatusKnown{false};
 static TaskHandle_t s_voiceIdTask = nullptr;
 static int s_enrollLeft = 0;                   // "learn my voice": samples still to record
 static int s_enrollMisses = 0;                 // ...and answers in a row that heard nothing
+static int s_enrollShort = 0;                  // ...and too-short ones in a row
 static bool s_forceFollowUp = false;           // listen again after this reply even if follow_up is off
 struct Introduced {                            // "this is my friend Sarah" / "it's me"
     SpeakerIntro::Kind kind = SpeakerIntro::None;
@@ -770,15 +771,28 @@ static std::string speakerLine(Speaker who) {
 // "learn my voice": three samples of a few sentences each, recorded as
 // follow-ups (each reply asks for the next).
 static void enrollStep() {
-    const size_t len = s_turnLen.load();
+    // The first 0.8 s is the echo of his own question: not part of the sample.
+    constexpr size_t kEcho = 16000 * 8 / 10;
+    const size_t total = s_turnLen.load();
+    const size_t skip = total > kEcho ? kEcho : total;
+    const size_t len = total - skip;
     s_enrollMisses = 0;
     if (len < 16000 * 5 / 2) {
+        // Too short. Listen again quietly first: saying so makes another echo
+        // that could end the next recording too.
+        if (++s_enrollShort < 3 && assistantBeginTurn(true)) {
+            ESP_LOGI(TAG, "voice recognition: sample too short (%.1f s); still listening", len / 16000.0);
+            voiceFollowUp();
+            return;
+        }
+        s_enrollShort = 0;
         s_forceFollowUp = true;
         deliverReply("[thinking] That was a bit short. Say a couple more sentences, anything at all!", true);
         return;
     }
+    s_enrollShort = 0;
     std::string resp;
-    const int status = voiceIdRequest("POST", "/enroll", s_turnPcm, len * sizeof(int16_t), &resp);
+    const int status = voiceIdRequest("POST", "/enroll", s_turnPcm + skip, len * sizeof(int16_t), &resp);
     if (status != 200) {
         s_enrollLeft = 0;
         ESP_LOGW(TAG, "voice recognition: enroll failed (HTTP %d) %.120s", status, resp.c_str());
@@ -855,6 +869,7 @@ static void handleHeard(const std::string& text) {
             ESP_LOGI(TAG, "voice recognition: learning the owner's voice");
             s_enrollLeft = 3;
             s_enrollMisses = 0;
+            s_enrollShort = 0;
             s_forceFollowUp = true;
             deliverReply("[happy] Okay! I'll listen to you three times. First, tell me a little about yourself, a few "
                          "sentences.", true);
