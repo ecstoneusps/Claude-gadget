@@ -124,6 +124,15 @@ llama3.1/3.2 and mistral-nemo do; gemma3 doesn't).
    scripts as tools. Optionally add to its instructions: "If you don't know
    something or it may have changed recently, use the web search tool."
 
+## Watching the desk (optional)
+
+[Buddy's eyes](tools/buddy-eyes) is a small program for the PC that runs
+Ollama: it watches the desk through the PC's webcam while you're there (pictures
+are never saved), keeps a diary of the day, and every half hour or so Buddy may
+remark on something ("third donut today?"), or ask "who's that?" when someone
+walks in. A **Buddy's eyes** switch in Home Assistant pauses it, and **What
+Buddy sees** holds the diary for his AI instructions.
+
 ## Knowing who's talking (optional)
 
 Buddy can tell **you** from **everyone else** by voice, so he uses your name
