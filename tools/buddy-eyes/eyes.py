@@ -162,7 +162,8 @@ def look(cfg, jpg):
         f"This is a webcam picture of {cfg['owner']}'s desk. The person sitting at the desk is "
         f"{cfg['owner']}, and a presence sensor confirms {cfg['owner']} is there right now (maybe "
         "partly out of frame, leaning back or in poor light). Reply with JSON only: "
-        '{"people": how many people you can see, '
+        '{"people": how many real people are in the room (don\'t count people on screens, photos or '
+        'posters), '
         '"activity": one short sentence about what ' + cfg["owner"] + " is doing, eating, drinking or holding, "
         '"notable": anything unusual or new worth a remark (someone else in the room, a pet, food, a funny '
         'face...), or "" if nothing}. Be factual and brief; don\'t guess.'
@@ -223,6 +224,7 @@ def clean_remark(reply):
     r = reply.strip().strip('"').strip()
     if not r or re.fullmatch(r"(\[[a-z ]+\]\s*)?NONE\.?", r, flags=re.I):
         return None
+    r = re.sub(r"[*_`#]+", "", r)  # markdown emphasis would be read out or look odd
     if len(r) > 300:  # too long for a passing remark
         return None
     return r
@@ -346,6 +348,7 @@ def main():
     next_remark = time.time() + cfg["remark_every"] * 60 * random.uniform(0.5, 1.0)
     last_remark = 0.0
     last_people = 1
+    greeted = False  # already asked about the current visitor
     while True:
         time.sleep(cfg["look_every"])
         if not (buddy.enabled and buddy.at_desk and buddy.awake) or in_quiet_hours(cfg):
@@ -369,11 +372,16 @@ def main():
             buddy.report(diary)
         # Someone else showed up: say something now (not more than every 10 min).
         reason = None
-        if people > last_people and people >= 2 and time.time() - last_remark > 600:
+        # Two looks in a row, so one miscount doesn't make him ask "who's that?".
+        if people >= 2 and last_people >= 2 and not greeted and time.time() - last_remark > 600:
+            greeted = True
             reason = ("Someone else just came into view. Playfully ask who that is, or greet them; don't call "
                       f"them {cfg['owner']}.")
-        elif time.time() >= next_remark:
-            reason = "Nothing urgent: only speak up if something in the diary is worth a remark."
+        else:
+            if people < 2 and last_people < 2:
+                greeted = False  # they've gone: greet the next visitor
+            if time.time() >= next_remark:
+                reason = "Nothing urgent: only speak up if something in the diary is worth a remark."
         last_people = people
         if reason and not buddy.muted:
             try:

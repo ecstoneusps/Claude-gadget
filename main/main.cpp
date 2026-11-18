@@ -709,6 +709,31 @@ static void saveSettingSoon(const char* key, int value, uint32_t now) {
     saveAt = 0;
 }
 
+// Something Home Assistant asked him to say, waiting until he's free.
+static std::string pendingSay;
+static uint32_t pendingSayAt = 0, freeSince = 0;
+static constexpr uint32_t kSayWaitMs = 3 * 60 * 1000;  // stale after this
+static constexpr uint32_t kSayGapMs = 3000;            // quiet time after a conversation
+
+static void sayWhenFree(uint32_t now) {
+    if (pendingSay.empty()) return;
+    if (now - pendingSayAt > kSayWaitMs || !aiStarted.load()) {
+        ESP_LOGW(TAG, "couldn't say it (%s)", aiStarted.load() ? "he was busy talking for too long"
+                                                               : "Home Assistant's voice not connected");
+        pendingSay.clear();
+        return;
+    }
+    if (!assistantAvailable()) {  // talking or listening
+        freeSince = 0;
+        return;
+    }
+    // Free for a moment first, so it doesn't jump in right as he finishes.
+    const bool waited = now - pendingSayAt > 500;
+    if (freeSince == 0) freeSince = now;
+    if (waited && now - freeSince < kSayGapMs) return;
+    if (assistantSay(pendingSay)) pendingSay.clear();
+}
+
 // Home Assistant (MQTT): send what he senses, carry out what it asks.
 static void handleHass(uint32_t now, bool dimmed) {
     HassCommand cmd;
@@ -732,8 +757,11 @@ static void handleHass(uint32_t now, bool dimmed) {
             case HassCommand::Say:
                 if (cmd.text.empty()) break;
                 ESP_LOGI(TAG, "Home Assistant asks him to say: \"%s\"", cmd.text.c_str());
-                if (!aiStarted.load() || !assistantSay(cmd.text))
-                    ESP_LOGW(TAG, "couldn't say it (Home Assistant's voice not connected, or he's busy talking)");
+                // Busy talking or listening: say it once the conversation is
+                // over (a newer request replaces a waiting one).
+                pendingSay = cmd.text;
+                pendingSayAt = now;
+                freeSince = 0;
                 break;
             case HassCommand::Photo:
                 startPhoto(false, "", false, now);
@@ -849,6 +877,7 @@ static void uiTask(void*) {
         }
         handleVolumeChange(now);
         handleHass(now, dimmed);
+        sayWhenFree(now);
         memoryService();  // save notes to the SD card if they changed
         photoNotesService();  // and new photo descriptions
         switch (buddy.takeCameraRequest()) {  // "take a picture" / offline "what is this"
