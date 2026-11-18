@@ -165,8 +165,8 @@ def look(cfg, jpg):
         '{"people": how many real people are in the room (don\'t count people on screens, photos or '
         'posters), '
         '"activity": one short sentence about what ' + cfg["owner"] + " is doing, eating, drinking or holding, "
-        '"notable": anything unusual or new worth a remark (someone else in the room, a pet, food, a funny '
-        'face...), or "" if nothing}. Be factual and brief; don\'t guess.'
+        '"notable": something clearly visible and out of the ordinary, or "" (usually "")}. '
+        "Describe only what you can actually see in this picture; if you aren't sure, leave it out."
     )
     reply = ollama_chat(cfg, cfg["vision_model"],
                         [{"role": "user", "content": prompt, "images": [base64.b64encode(jpg).decode()]}],
@@ -208,8 +208,9 @@ def remark(cfg, diary, reason):
         f"{diary.text()}\n\n{reason}\n\n"
         "Say one short, natural remark out loud to " + cfg["owner"] + " about what you've noticed: funny, "
         "teasing or kind, one or two sentences, like a friend glancing over. Patterns over the day make the "
-        "best remarks (\"that's your third coffee\"). Don't repeat or rephrase anything you already said "
-        f"today:\n{said}\n\nStart with one emotion tag in square brackets, like [laughing], [happy], "
+        "best remarks (\"that's your third coffee\"). Only mention things that are actually in the diary. "
+        "Don't repeat, rephrase or bring up again anything you already said today:\n"
+        f"{said}\n\nStart with one emotion tag in square brackets, like [laughing], [happy], "
         "[surprised], [thinking] or [silly]. No lists, no markdown, no emoji. If nothing is worth saying "
         "right now, reply with just NONE."
     )
@@ -228,6 +229,21 @@ def clean_remark(reply):
     if len(r) > 300:  # too long for a passing remark
         return None
     return r
+
+
+def _words(text):
+    text = re.sub(r"\[[a-z ]+\]", " ", text.lower())  # the emotion tag
+    return {w for w in re.findall(r"[a-z0-9']+", text) if len(w) > 3}
+
+
+def too_similar(remark, earlier):
+    """True if a remark mostly repeats one Buddy already made today."""
+    a = _words(remark)
+    for e in earlier:
+        b = _words(e)
+        if a and b and len(a & b) / min(len(a), len(b)) >= 0.5:
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -388,6 +404,9 @@ def main():
                 r = remark(cfg, diary, reason)
             except requests.RequestException as e:
                 log(f"chat model: {e}")
+                r = None
+            if r and too_similar(r, diary.remarks):
+                log(f"(skipped a repeat: {r})")
                 r = None
             if r:
                 log(f"says: {r}")
