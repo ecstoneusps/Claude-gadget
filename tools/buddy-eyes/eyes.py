@@ -432,9 +432,9 @@ def main():
         log("haven't heard from Buddy yet (is his MQTT set up and is he on?); still waiting")
         buddy.seen.wait()
     next_remark = time.time() + cfg["remark_every"] * 60 * random.uniform(0.5, 1.0)
-    last_remark = 0.0
     last_people = 1
     greeted = False  # already asked about the current visitor
+    last_greeting = 0.0
     while True:
         time.sleep(cfg["look_every"])
         if not (buddy.enabled and buddy.at_desk and buddy.awake) or in_quiet_hours(cfg):
@@ -456,12 +456,14 @@ def main():
         if diary.add(line, people):
             log(f"saw: {line} [{people} people]")
             buddy.report(diary)
-        # Someone else showed up: say something now (not more than every 10 min).
+        # Someone else showed up: say something now (one greeting per visitor,
+        # and not more than every 10 min if they keep popping in and out).
         reason = None
         visitor = False
         # Two looks in a row, so one miscount doesn't make him ask "who's that?".
-        if people >= 2 and last_people >= 2 and not greeted and time.time() - last_remark > 600:
+        if people >= 2 and last_people >= 2 and not greeted and time.time() - last_greeting > 600:
             greeted = True
+            last_greeting = time.time()
             visitor = True
             reason = ("Someone else just came into view. Playfully ask who that is, or greet them; don't call "
                       f"them {cfg['owner']}.")
@@ -499,7 +501,6 @@ def main():
                 log(f"{'thinks' if own else 'says'}: {r}")
                 buddy.say(r)
                 diary.said(r)
-                last_remark = time.time()
             next_remark = time.time() + cfg["remark_every"] * 60 * random.uniform(0.8, 1.2)
 
 
