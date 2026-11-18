@@ -65,6 +65,7 @@ def load_config():
         "mqtt_password": c.get("mqtt_password", "").strip(),
         "look_every": c.getint("look_every_seconds", 60),
         "remark_every": c.getint("remark_every_minutes", 30),
+        "thoughts": max(0, min(100, c.getint("thoughts_percent", 40))),
         "quiet_from": c.get("quiet_hours_from", "23:00").strip(),
         "quiet_to": c.get("quiet_hours_to", "07:00").strip(),
     }
@@ -146,8 +147,10 @@ def snapshot(index):
         cam.release()
 
 
-def ollama_chat(cfg, model, messages, json_format=False, timeout=120):
+def ollama_chat(cfg, model, messages, json_format=False, timeout=120, temperature=None):
     body = {"model": model, "messages": messages, "stream": False, "keep_alive": "10m"}
+    if temperature is not None:
+        body["options"] = {"temperature": temperature}
     if json_format:
         body["format"] = "json"
     r = requests.post(f"{cfg['ollama']}/api/chat", json=body, timeout=timeout)
@@ -229,6 +232,44 @@ def remark(cfg, diary, reason):
         {"role": "system", "content": PERSONALITY.format(owner=cfg["owner"])},
         {"role": "user", "content": task},
     ])
+    return clean_remark(reply)
+
+
+# Starting points for a thought of his own, so they don't all sound the same.
+THOUGHT_SEEDS = (
+    "something you've been wondering about lately (big or silly)",
+    "what you'd love to do today if you weren't a small robot puppy on a desk",
+    "a funny thought that just popped into your head",
+    "a daydream you just had",
+    "a tiny complaint about robot-puppy life, played for laughs",
+    "a question you'd like to ask {owner}, just out of curiosity",
+    "a plan or goal you've secretly been working on",
+    "a strange or fun fact you were thinking about, and your take on it",
+    "something you're looking forward to later today or this week",
+    "an opinion you've formed about something ordinary (socks, Mondays, clouds, keyboards...)",
+    "how you're feeling right now, and why, in a funny way",
+    "a game or challenge you just invented",
+)
+
+
+def thought(cfg, diary):
+    """Asks the chat model for a thought of Buddy's own (or None)."""
+    now = dt.datetime.now()
+    said = "\n".join(diary.remarks[-12:]) or "(nothing yet)"
+    seed = random.choice(THOUGHT_SEEDS).format(owner=cfg["owner"])
+    task = (
+        f"It's {now.strftime('%A')} at {now.strftime('%H:%M')}. You're sitting on {cfg['owner']}'s desk and "
+        f"feel like saying something out of the blue: share {seed}. This is your own inner life talking, "
+        f"not a comment on what {cfg['owner']} is doing, so don't describe or guess what {cfg['owner']} is "
+        "doing, eating or drinking. One or two short sentences, spoken out loud, playful and a little "
+        "quirky, like a friend thinking aloud. Make it fresh: nothing like what you already said today:\n"
+        f"{said}\n\nStart with one emotion tag in square brackets, like [happy], [thinking], [silly], "
+        "[surprised] or [sleepy]. No lists, no markdown, no emoji."
+    )
+    reply = ollama_chat(cfg, cfg["chat_model"], [
+        {"role": "system", "content": PERSONALITY.format(owner=cfg["owner"])},
+        {"role": "user", "content": task},
+    ], temperature=1.0)
     return clean_remark(reply)
 
 
@@ -416,9 +457,11 @@ def main():
             buddy.report(diary)
         # Someone else showed up: say something now (not more than every 10 min).
         reason = None
+        visitor = False
         # Two looks in a row, so one miscount doesn't make him ask "who's that?".
         if people >= 2 and last_people >= 2 and not greeted and time.time() - last_remark > 600:
             greeted = True
+            visitor = True
             reason = ("Someone else just came into view. Playfully ask who that is, or greet them; don't call "
                       f"them {cfg['owner']}.")
         else:
@@ -428,19 +471,31 @@ def main():
                 reason = "Nothing urgent: only speak up if something in the diary is worth a remark."
         last_people = people
         if reason and not buddy.muted:
+            # Now and then (and sometimes when there's nothing to remark on),
+            # a thought of his own instead of a comment on what he sees.
+            own = not visitor and random.uniform(0, 100) < cfg["thoughts"]
+            r = None
             try:
-                r = remark(cfg, diary, reason)
+                if not own:
+                    r = remark(cfg, diary, reason)
+                    if r and too_similar(r, diary.remarks):
+                        log(f"(skipped a repeat: {r})")
+                        r = None
+                    if r and (thing := invented(r, diary.text())):
+                        log(f"(skipped, made up \"{thing}\": {r})")
+                        r = None
+                    if not r and not visitor and random.uniform(0, 100) < cfg["thoughts"]:
+                        own = True
+                if own:
+                    r = thought(cfg, diary)
+                    if r and too_similar(r, diary.remarks):
+                        log(f"(skipped a repeat: {r})")
+                        r = None
             except requests.RequestException as e:
                 log(f"chat model: {e}")
                 r = None
-            if r and too_similar(r, diary.remarks):
-                log(f"(skipped a repeat: {r})")
-                r = None
-            if r and (thing := invented(r, diary.text())):
-                log(f"(skipped, made up \"{thing}\": {r})")
-                r = None
             if r:
-                log(f"says: {r}")
+                log(f"{'thinks' if own else 'says'}: {r}")
                 buddy.say(r)
                 diary.said(r)
                 last_remark = time.time()

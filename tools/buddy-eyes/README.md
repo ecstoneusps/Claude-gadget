@@ -2,7 +2,9 @@
 
 Lets Buddy watch the desk through your PC's webcam and make the odd remark
 about what he sees ("That's your third donut today, you'll be bouncing off the
-walls!"), and ask "who's that?" when someone else shows up.
+walls!"), share thoughts of his own now and then (a daydream, something he's
+wondering about, a plan for the day), and ask "who's that?" when someone else
+shows up.
 
 It runs on the Windows PC that runs Ollama. About once a minute, **while
 Buddy's radar says you're at the desk**, it takes a webcam picture (kept in
@@ -10,6 +12,10 @@ memory only, never saved), asks the vision model what's going on, and writes
 one line in a diary of the day (`diary.json`, text only). Roughly every 30
 minutes it asks the chat model whether anything in the diary is worth a remark;
 most of the time the answer is no. When it's yes, Buddy says it in his own voice.
+About 40 % of the time (`thoughts_percent`), and sometimes when there's nothing
+to remark on, he shares a thought of his own instead. Remarks that repeat
+earlier ones, or mention food, drinks or things the diary never saw, are
+skipped.
 
 It doesn't watch or talk while Buddy is asleep, muted ("be quiet"), during quiet
 hours (11 pm to 7 am by default), or while you've paused it.
