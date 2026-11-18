@@ -465,6 +465,10 @@ def main():
     diary = Diary(DIARY_FILE)
     buddy = Buddy(cfg)
     log(f"Buddy's eyes: camera {cfg['camera']}, vision {cfg['vision_model']}, chat {cfg['chat_model']}")
+    if cfg["desk_notes"]:
+        log(f"desk notes: {cfg['desk_notes']}")
+    if cfg["save_picture"]:
+        log(f"saving each picture as {PICTURE_FILE}")
     if not buddy.seen.wait(60):
         log("haven't heard from Buddy yet (is his MQTT set up and is he on?); still waiting")
         buddy.seen.wait()
