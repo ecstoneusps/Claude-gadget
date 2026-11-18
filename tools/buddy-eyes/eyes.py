@@ -261,8 +261,9 @@ def thought(cfg, diary):
         f"It's {now.strftime('%A')} at {now.strftime('%H:%M')}. You're sitting on {cfg['owner']}'s desk and "
         f"feel like saying something out of the blue: share {seed}. This is your own inner life talking, "
         f"not a comment on what {cfg['owner']} is doing, so don't describe or guess what {cfg['owner']} is "
-        "doing, eating or drinking. One or two short sentences, spoken out loud, playful and a little "
-        "quirky, like a friend thinking aloud. Make it fresh: nothing like what you already said today:\n"
+        f"doing, eating, drinking or saying. You're talking to {cfg['owner']}: call them \"you\", not by "
+        "name in the third person. One or two short sentences (under 35 words), spoken out loud, playful "
+        "and a little quirky, like a friend thinking aloud. Make it fresh: nothing like what you already said today:\n"
         f"{said}\n\nStart with one emotion tag in square brackets, like [happy], [thinking], [silly], "
         "[surprised] or [sleepy]. No lists, no markdown, no emoji."
     )
