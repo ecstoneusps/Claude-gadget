@@ -174,6 +174,14 @@ def look(cfg, jpg):
     return parse_look(reply)
 
 
+def _drop_echo(text):
+    """Removes sentences or brackets that just repeat the prompt's note about
+    the presence sensor (the vision model sometimes copies it back)."""
+    parts = re.split(r"(?<=[.!?])\s+|\s*[()]\s*", text)
+    keep = [p for p in parts if p and not re.search(r"sensor|confirm|out of frame|poor light", p, re.I)]
+    return " ".join(keep).strip().rstrip(".,;")
+
+
 def parse_look(reply):
     try:
         d = json.loads(reply)
@@ -183,8 +191,8 @@ def parse_look(reply):
         people = int(d.get("people", 0))
     except (TypeError, ValueError):
         people = 0
-    activity = str(d.get("activity", "")).strip().rstrip(".")
-    notable = str(d.get("notable", "")).strip().rstrip(".")
+    activity = _drop_echo(str(d.get("activity", "")))
+    notable = _drop_echo(str(d.get("notable", "")))
     # Buddy's eyes only looks while the radar says someone is at the desk, so
     # "nobody there" is the camera missing them (out of frame, dark), not news.
     if not activity or re.search(r"\b(nobody|no one|no-one|empty|no person|not visible)\b", activity, re.I):
