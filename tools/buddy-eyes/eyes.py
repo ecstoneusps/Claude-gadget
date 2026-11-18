@@ -31,6 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(HERE, "eyes.ini")
 DIARY_FILE = os.path.join(HERE, "diary.json")
 STATE_FILE = os.path.join(HERE, "state.json")
+PICTURE_FILE = os.path.join(HERE, "last_look.jpg")  # only with save_last_picture = on
 AVAIL_TOPIC = "buddy_eyes/status"
 
 
@@ -66,6 +67,8 @@ def load_config():
         "look_every": c.getint("look_every_seconds", 60),
         "remark_every": c.getint("remark_every_minutes", 30),
         "thoughts": max(0, min(100, c.getint("thoughts_percent", 40))),
+        "desk_notes": c.get("desk_notes", "").strip(),
+        "save_picture": c.getboolean("save_last_picture", False),
         "quiet_from": c.get("quiet_hours_from", "23:00").strip(),
         "quiet_to": c.get("quiet_hours_to", "07:00").strip(),
     }
@@ -164,12 +167,16 @@ def look(cfg, jpg):
     prompt = (
         f"This is a webcam picture of {cfg['owner']}'s desk. The person sitting at the desk is "
         f"{cfg['owner']}, and a presence sensor confirms {cfg['owner']} is there right now (maybe "
-        "partly out of frame, leaning back or in poor light). Reply with JSON only: "
+        "partly out of frame, leaning back or in poor light). "
+        + (f"About the desk: {cfg['desk_notes']}. Don't mention what's always on the desk unless "
+           f"{cfg['owner']} is using it right now. " if cfg["desk_notes"] else "")
+        + "Reply with JSON only: "
         '{"people": how many real people are in the room (don\'t count people on screens, photos or '
         'posters), '
         '"activity": one short sentence about what ' + cfg["owner"] + " is doing, eating, drinking or holding, "
         '"notable": something clearly visible and out of the ordinary, or "" (usually "")}. '
-        "Describe only what you can actually see in this picture; if you aren't sure, leave it out."
+        "Describe only what you can clearly see in this picture; if you aren't sure what an object is, "
+        "leave it out rather than guess (a dark shape is not a mug, a keyboard is not a laptop)."
     )
     reply = ollama_chat(cfg, cfg["vision_model"],
                         [{"role": "user", "content": prompt, "images": [base64.b64encode(jpg).decode()]}],
@@ -306,7 +313,7 @@ def clean_remark(reply):
 # them is only allowed if the diary mentions it too.
 INVENTABLE = ("coffee", "tea", "drink", "mug", "cup", "soda", "beer", "water", "energy drink", "juice",
               "donut", "doughnut", "snack", "chips", "cookie", "pizza", "sandwich", "burger", "candy",
-              "chocolate", "face", "yawn", "phone", "cat", "dog", "hat", "glasses")
+              "chocolate", "face", "yawn", "phone", "laptop", "cat", "dog", "hat", "glasses")
 
 
 def things_in(text):
@@ -479,6 +486,12 @@ def main():
         except requests.RequestException as e:
             log(f"vision model: {e}")
             continue
+        if cfg["save_picture"]:  # so you can see what the camera sees
+            try:
+                with open(PICTURE_FILE, "wb") as f:
+                    f.write(jpg)
+            except OSError:
+                pass
         del jpg
         if not seen:
             continue

@@ -20,6 +20,19 @@ skipped.
 It doesn't watch or talk while Buddy is asleep, muted ("be quiet"), during quiet
 hours (11 pm to 7 am by default), or while you've paused it.
 
+## If he keeps seeing things that aren't there
+
+The vision model can mistake things on your desk for something else (a dark
+shape for a mug, a keyboard for a laptop). In `eyes.ini`:
+
+- `save_last_picture = on` keeps the latest webcam picture as `last_look.jpg`
+  in this folder, so you can see what the camera sees (turn it back off after).
+- `desk_notes` tells the vision model what's always on the desk, and what
+  isn't, e.g. `desk_notes = a desktop PC with two monitors, a keyboard and
+  mouse; no laptop, no mug or cup`.
+
+Then delete `diary.json` so the mistaken lines are gone, and restart.
+
 ## In Home Assistant
 
 On the **Desk Buddy** device:
