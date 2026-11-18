@@ -43,8 +43,15 @@ def log(msg):
 
 def load_config():
     cfg = configparser.ConfigParser()
-    if not cfg.read(CONFIG_FILE, encoding="utf-8"):
+    # Windows hides file extensions, so "eyes.ini" typed in Explorer often
+    # becomes eyes.ini.ini or eyes.ini.txt; accept those too.
+    names = [CONFIG_FILE, CONFIG_FILE + ".ini", CONFIG_FILE + ".txt"]
+    found = next((n for n in names if os.path.isfile(n)), None)
+    if not found:
         sys.exit(f"Missing {CONFIG_FILE}: copy eyes.example.ini to eyes.ini and fill it in.")
+    cfg.read(found, encoding="utf-8-sig")
+    if "eyes" not in cfg:
+        sys.exit(f"{found} has no [eyes] line at the top: copy eyes.example.ini again.")
     c = cfg["eyes"]
     return {
         "owner": c.get("owner_name", "my owner").strip(),
