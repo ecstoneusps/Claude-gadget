@@ -47,9 +47,47 @@ static float chunkLevel(const int16_t* p, int n) {
     return l < 0 ? 0 : l > 1 ? 1 : l;
 }
 
+// Speech boost (speech_boost): the TTS voice is turned up by a fixed gain,
+// and a limiter holds the loudest parts just below full scale, so the small
+// speaker gets more loudness without clipping. Per 16 ms chunk the gain drops
+// at once to whatever keeps that chunk's peak in range (ramped across the
+// chunk, so no clicks) and recovers slowly (about 6 dB per 0.3 s).
+static std::atomic<float> s_boostGain{1.0f};
+
+void soundSetSpeechBoost(int db) {
+    s_boostGain.store(db > 0 ? powf(10.0f, db / 20.0f) : 1.0f);
+}
+
+static void boostChunk(int16_t* p, int n, float& gain) {
+    const float target = s_boostGain.load();
+    if (target <= 1.0f) return;
+    int peak = 1;
+    for (int i = 0; i < n; ++i) {
+        const int a = p[i] < 0 ? -p[i] : p[i];
+        if (a > peak) peak = a;
+    }
+    constexpr float kCeiling = 30000.0f;  // about -0.8 dBFS
+    const float allowed = kCeiling / (float)peak;
+    float next = gain * 1.06f;  // release
+    if (next > target) next = target;
+    if (next > allowed) next = allowed;  // attack: this chunk must fit
+    // Ramp from the old gain to the new one; if the old one was higher, the
+    // ramp could overshoot on this chunk's peak, so start at the new one then.
+    const float start = gain < next ? gain : next;
+    for (int i = 0; i < n; ++i) {
+        const float g = start + (next - start) * (float)(i + 1) / (float)n;
+        float v = (float)p[i] * g;
+        if (v > 32767.0f) v = 32767.0f;
+        if (v < -32768.0f) v = -32768.0f;
+        p[i] = (int16_t)v;
+    }
+    gain = next;
+}
+
 static bool playSpeech() {
     if (!s_speechStart.exchange(false)) return false;
     s_playing.store(true);
+    float gain = s_boostGain.load();
     int16_t buf[256];  // 16 ms
     while (!s_stopSpeech.load()) {
         const size_t got = xStreamBufferReceive(s_speechBuf, buf, sizeof buf, pdMS_TO_TICKS(20));
@@ -59,6 +97,7 @@ static bool playSpeech() {
             continue;
         }
         const int n = (int)(got / sizeof(int16_t));
+        boostChunk(buf, n, gain);
         s_speechLevel.store(chunkLevel(buf, n));
         audioWrite(buf, n);
         s_lastSoundUs.store(esp_timer_get_time());

@@ -10,6 +10,7 @@
 struct BuddyConfig {
     // Sound and screen
     int volume = 63;               // 0-100
+    int speechBoost = 8;           // dB of extra loudness for his spoken voice (limited, so no clipping)
     int brightness = 63;           // 0-100
     int dimBrightness = 8;         // 0-100
     bool puppyVoice = true;        // sound_style: puppy (yips, barks) or robot (chirps, boops)

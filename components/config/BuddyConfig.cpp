@@ -144,6 +144,8 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
 
         if (key == "volume") {
             if (!parseInt(val, 0, 100, cfg.volume)) bad("must be 0-100");
+        } else if (key == "speech_boost") {
+            if (!parseInt(val, 0, 15, cfg.speechBoost)) bad("must be 0-15");
         } else if (key == "sound_style") {
             const std::string v = lower(val);
             if (v == "puppy") cfg.puppyVoice = true;
@@ -457,6 +459,7 @@ std::string defaultConfigText() {
     add("");
     add("# --- Sound and screen ---");
     num("volume", d.volume, "speaker volume, 0-100 (\"be quiet\" still mutes it)");
+    num("speech_boost", d.speechBoost, "extra loudness for his voice in dB, 0-15 (louder but flatter; 0 = off)");
     snprintf(buf, sizeof buf, "%-28s = %-6s # %s", "sound_style", d.puppyVoice ? "puppy" : "robot",
              "puppy (yips, barks, panting) or robot (chirps, boops); sounds/<name>.wav on the card replaces one");
     add(buf);

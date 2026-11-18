@@ -987,6 +987,7 @@ extern "C" void app_main(void) {
     sfxSetStyle(config.puppyVoice ? SfxStyle::Puppy : SfxStyle::Robot);
     soundInit();
     soundSetVolume(config.volume);
+    soundSetSpeechBoost(config.speechBoost);
 
     // Speech runs on core 0; drawing and input get core 1.
     xTaskCreatePinnedToCore(uiTask, "ui", 8192, nullptr, 4, nullptr, 1);

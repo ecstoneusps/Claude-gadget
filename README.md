@@ -513,6 +513,7 @@ and restart the buddy.
 | Setting | What it changes |
 |---|---|
 | `volume`, `brightness`, `dim_brightness` | Speaker and screen levels, 0-100 |
+| `speech_boost` | Extra loudness for his spoken voice, in dB (8 by default, 0-15). The loudest parts are held just below full scale, so quiet syllables get louder without clipping: higher is louder but sounds flatter. `0` turns it off |
 | `sleep_after_seconds`, `dim_after_seconds`, `sleep_after_leaving_seconds` | How quickly it gets sleepy and dims |
 | `command_confidence` | Raise to around 0.3 if it reacts to things you didn't say. The serial log shows each command's confidence |
 | `say.<command> = phrase, phrase` | Extra ways to say any command, e.g. `say.hello = howdy, whats up buddy` |

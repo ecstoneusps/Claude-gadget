@@ -7,6 +7,7 @@
 
 # --- Sound and screen ---
 volume                       = 63     # speaker volume, 0-100 ("be quiet" still mutes it)
+speech_boost                 = 8      # extra loudness for his voice in dB, 0-15 (louder but flatter; 0 = off)
 sound_style                  = puppy  # puppy (yips, barks, panting) or robot (chirps, boops); sounds/<name>.wav on the card replaces one
 brightness                   = 63     # screen brightness, 0-100
 screen_flip                  = on     # on: CoreS3 turned around in the puppy head (camera at the top)

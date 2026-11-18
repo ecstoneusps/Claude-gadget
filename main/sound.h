@@ -7,6 +7,7 @@
 
 void soundInit();                    // pre-renders every effect and starts the player task
 void soundSetVolume(int percent);    // 0-100
+void soundSetSpeechBoost(int db);    // extra loudness for spoken replies (limited, no clipping); 0 = off
 void soundPlay(Sfx s);               // start a sound, interrupting any playing one
 
 // True while a sound plays and for `tailMs` after, so the mic-based reactions
