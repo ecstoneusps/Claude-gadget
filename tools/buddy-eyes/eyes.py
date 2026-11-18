@@ -252,10 +252,28 @@ THOUGHT_SEEDS = (
 )
 
 
+CLAIMS_ABOUT_OWNER = re.compile(r"\b(every ?time you|whenever you|you always|you never|you (say|said|keep saying))\b", re.I)
+
+
+def fresh_thought(cfg, diary, tries=3):
+    """A thought that isn't like anything he said today and doesn't make
+    claims about the owner (new starting point each try), or None."""
+    for _ in range(tries):
+        r = thought(cfg, diary)
+        if not r:
+            continue
+        if too_similar(r, diary.remarks):
+            log(f"(skipped a repeat: {r})")
+        elif CLAIMS_ABOUT_OWNER.search(r):
+            log(f"(skipped, guessed about you: {r})")
+        else:
+            return r
+    return None
+
+
 def thought(cfg, diary):
     """Asks the chat model for a thought of Buddy's own (or None)."""
     now = dt.datetime.now()
-    said = "\n".join(diary.remarks[-12:]) or "(nothing yet)"
     seed = random.choice(THOUGHT_SEEDS).format(owner=cfg["owner"])
     task = (
         f"It's {now.strftime('%A')} at {now.strftime('%H:%M')}. You're sitting on {cfg['owner']}'s desk and "
@@ -263,8 +281,8 @@ def thought(cfg, diary):
         f"not a comment on what {cfg['owner']} is doing, so don't describe or guess what {cfg['owner']} is "
         f"doing, eating, drinking or saying. You're talking to {cfg['owner']}: call them \"you\", not by "
         "name in the third person. One or two short sentences (under 35 words), spoken out loud, playful "
-        "and a little quirky, like a friend thinking aloud. Make it fresh: nothing like what you already said today:\n"
-        f"{said}\n\nStart with one emotion tag in square brackets, like [happy], [thinking], [silly], "
+        f"and a little quirky, like a friend thinking aloud. Don't claim things about what {cfg['owner']} "
+        "always says or does.\n\nStart with one emotion tag in square brackets, like [happy], [thinking], [silly], "
         "[surprised] or [sleepy]. No lists, no markdown, no emoji."
     )
     reply = ollama_chat(cfg, cfg["chat_model"], [
@@ -291,6 +309,12 @@ INVENTABLE = ("coffee", "tea", "drink", "mug", "cup", "soda", "beer", "water", "
               "chocolate", "face", "yawn", "phone", "cat", "dog", "hat", "glasses")
 
 
+def things_in(text):
+    """Which of the easily imagined things (INVENTABLE) a text mentions."""
+    t = text.lower()
+    return {x for x in INVENTABLE if re.search(r"\b" + re.escape(x) + r"s?\b", t)}
+
+
 def invented(remark, diary_text):
     """The first thing the remark mentions that the diary never does, or None."""
     r, d = remark.lower(), diary_text.lower()
@@ -301,9 +325,15 @@ def invented(remark, diary_text):
     return None
 
 
+STOPWORDS = set("""about after again also another back been before being could does doing done even
+every from have here just know like make maybe more most much must only over really right same should
+some still such than that their them then there these they thing things think this those through very
+want were what when where which while will with would your you're yours today wonder wondering""".split())
+
+
 def _words(text):
     text = re.sub(r"\[[a-z ]+\]", " ", text.lower())  # the emotion tag
-    return {w for w in re.findall(r"[a-z0-9']+", text) if len(w) > 3}
+    return {w for w in re.findall(r"[a-z0-9']+", text) if len(w) > 3 and w not in STOPWORDS}
 
 
 def too_similar(remark, earlier):
@@ -311,7 +341,7 @@ def too_similar(remark, earlier):
     a = _words(remark)
     for e in earlier:
         b = _words(e)
-        if a and b and len(a & b) / min(len(a), len(b)) >= 0.5:
+        if a and b and len(a & b) / min(len(a), len(b)) >= 0.35:
             return True
     return False
 
@@ -435,6 +465,7 @@ def main():
     last_people = 1
     greeted = False  # already asked about the current visitor
     last_greeting = 0.0
+    last_line = ""  # what the previous look saw
     while True:
         time.sleep(cfg["look_every"])
         if not (buddy.enabled and buddy.at_desk and buddy.awake) or in_quiet_hours(cfg):
@@ -453,7 +484,13 @@ def main():
             continue
         activity, people, notable = seen
         line = activity + (f" ({notable})" if notable else "")
-        if diary.add(line, people):
+        # The vision model sometimes imagines a mug or a snack in one picture:
+        # those only go in the diary once a second look in a row sees them too.
+        unsure = things_in(line) - things_in(last_line)
+        last_line = line
+        if unsure:
+            log(f"(not sure yet, {', '.join(sorted(unsure))}: {line})")
+        elif diary.add(line, people):
             log(f"saw: {line} [{people} people]")
             buddy.report(diary)
         # Someone else showed up: say something now (one greeting per visitor,
@@ -490,10 +527,7 @@ def main():
                     if not r and not visitor and random.uniform(0, 100) < cfg["thoughts"]:
                         own = True
                 if own:
-                    r = thought(cfg, diary)
-                    if r and too_similar(r, diary.remarks):
-                        log(f"(skipped a repeat: {r})")
-                        r = None
+                    r = fresh_thought(cfg, diary)
             except requests.RequestException as e:
                 log(f"chat model: {e}")
                 r = None
