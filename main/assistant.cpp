@@ -719,18 +719,23 @@ static void voiceIdTask(void*) {
     while (true) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         const uint32_t gen = s_turnGen.load();
-        const size_t len = s_turnLen.load();
+        // A follow-up's recording starts right after Buddy spoke, so its first
+        // 0.8 s can be the echo of his own voice: leave that out, or it pulls
+        // the owner's score down.
+        const size_t total = s_turnLen.load();
+        const size_t skip = s_followUpTurn.load() && total > 16000 * 8 / 10 ? 16000 * 8 / 10 : 0;
+        const size_t len = total - skip;
         Speaker who = Speaker::Unsure;
         std::string resp;
         if (voiceIdOn() && len >= 16000 &&
-            voiceIdRequest("POST", "/identify", s_turnPcm, len * sizeof(int16_t), &resp) == 200) {
+            voiceIdRequest("POST", "/identify", s_turnPcm + skip, len * sizeof(int16_t), &resp) == 200) {
             cJSON* j = cJSON_Parse(resp.c_str());
             const char* d = jstr(j, "decision");
             const cJSON* score = cJSON_GetObjectItemCaseSensitive(j, "score");
             if (d && strcmp(d, "owner") == 0) who = Speaker::Owner;
             else if (d && strcmp(d, "other") == 0) who = Speaker::Other;
-            ESP_LOGI(TAG, "voice: %s (score %.2f, %.1f s)", d ? d : "?", cJSON_IsNumber(score) ? score->valuedouble : 0.0,
-                     len / 16000.0);
+            ESP_LOGI(TAG, "voice: %s (score %.2f, %.1f s%s)", d ? d : "?",
+                     cJSON_IsNumber(score) ? score->valuedouble : 0.0, len / 16000.0, skip ? ", follow-up" : "");
             cJSON_Delete(j);
         }
         s_speaker.store((int)who);
