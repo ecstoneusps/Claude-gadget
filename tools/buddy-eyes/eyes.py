@@ -160,10 +160,10 @@ def look(cfg, jpg):
     """What's going on at the desk: (activity, number of people, something notable)."""
     prompt = (
         f"This is a webcam picture of {cfg['owner']}'s desk. The person sitting at the desk is "
-        f"{cfg['owner']}. Reply with JSON only: "
+        f"{cfg['owner']}, and a presence sensor confirms {cfg['owner']} is there right now (maybe "
+        "partly out of frame, leaning back or in poor light). Reply with JSON only: "
         '{"people": how many people you can see, '
-        '"activity": one short sentence about what ' + cfg["owner"] + " is doing, eating, drinking or holding "
-        "(or \"nobody at the desk\"), "
+        '"activity": one short sentence about what ' + cfg["owner"] + " is doing, eating, drinking or holding, "
         '"notable": anything unusual or new worth a remark (someone else in the room, a pet, food, a funny '
         'face...), or "" if nothing}. Be factual and brief; don\'t guess.'
     )
@@ -184,9 +184,11 @@ def parse_look(reply):
         people = 0
     activity = str(d.get("activity", "")).strip().rstrip(".")
     notable = str(d.get("notable", "")).strip().rstrip(".")
-    if not activity:
+    # Buddy's eyes only looks while the radar says someone is at the desk, so
+    # "nobody there" is the camera missing them (out of frame, dark), not news.
+    if not activity or re.search(r"\b(nobody|no one|no-one|empty|no person|not visible)\b", activity, re.I):
         return None
-    return activity, people, notable
+    return activity, max(people, 1), notable
 
 
 PERSONALITY = (
