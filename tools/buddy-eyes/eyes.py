@@ -242,6 +242,23 @@ def clean_remark(reply):
     return r
 
 
+# Things the small chat model likes to make up. A remark mentioning one of
+# them is only allowed if the diary mentions it too.
+INVENTABLE = ("coffee", "tea", "drink", "mug", "cup", "soda", "beer", "water", "energy drink", "juice",
+              "donut", "doughnut", "snack", "chips", "cookie", "pizza", "sandwich", "burger", "candy",
+              "chocolate", "face", "yawn", "phone", "cat", "dog", "hat", "glasses")
+
+
+def invented(remark, diary_text):
+    """The first thing the remark mentions that the diary never does, or None."""
+    r, d = remark.lower(), diary_text.lower()
+    for thing in INVENTABLE:
+        pat = r"\b" + re.escape(thing) + r"s?\b"
+        if re.search(pat, r) and not re.search(pat, d):
+            return thing
+    return None
+
+
 def _words(text):
     text = re.sub(r"\[[a-z ]+\]", " ", text.lower())  # the emotion tag
     return {w for w in re.findall(r"[a-z0-9']+", text) if len(w) > 3}
@@ -418,6 +435,9 @@ def main():
                 r = None
             if r and too_similar(r, diary.remarks):
                 log(f"(skipped a repeat: {r})")
+                r = None
+            if r and (thing := invented(r, diary.text())):
+                log(f"(skipped, made up \"{thing}\": {r})")
                 r = None
             if r:
                 log(f"says: {r}")
