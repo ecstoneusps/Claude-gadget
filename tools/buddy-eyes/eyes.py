@@ -179,7 +179,7 @@ def _drop_echo(text):
     the presence sensor (the vision model sometimes copies it back)."""
     parts = re.split(r"(?<=[.!?])\s+|\s*[()]\s*", text)
     keep = [p for p in parts if p and not re.search(r"sensor|confirm|out of frame|poor light", p, re.I)]
-    return " ".join(keep).strip().rstrip(".,;")
+    return " ".join(keep).strip().rstrip(" .,;")
 
 
 def parse_look(reply):
