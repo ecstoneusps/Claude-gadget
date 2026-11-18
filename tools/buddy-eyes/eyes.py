@@ -175,10 +175,11 @@ def look(cfg, jpg):
 
 
 def _drop_echo(text):
-    """Removes sentences or brackets that just repeat the prompt's note about
-    the presence sensor (the vision model sometimes copies it back)."""
+    """Removes sentences or brackets that repeat the prompt's note about the
+    presence sensor (the vision model sometimes copies it back) or talk about
+    the picture itself ("the image is blurry") instead of the desk."""
     parts = re.split(r"(?<=[.!?])\s+|\s*[()]\s*", text)
-    keep = [p for p in parts if p and not re.search(r"sensor|confirm|out of frame|poor light", p, re.I)]
+    keep = [p for p in parts if p and not re.search(r"sensor|confirm|out of frame|poor light|image|picture|photo|webcam|camera|blurr|difficult to|hard to tell", p, re.I)]
     return " ".join(keep).strip().rstrip(" .,;")
 
 
@@ -216,7 +217,9 @@ def remark(cfg, diary, reason):
         f"{diary.text()}\n\n{reason}\n\n"
         "Say one short, natural remark out loud to " + cfg["owner"] + " about what you've noticed: funny, "
         "teasing or kind, one or two sentences, like a friend glancing over. Patterns over the day make the "
-        "best remarks (\"that's your third coffee\"). Only mention things that are actually in the diary. "
+        "best remarks. Only mention things that are written in the diary: never invent food, drinks, "
+        "counts or faces that aren't there. If the diary only shows ordinary sitting, working or looking "
+        "at the screen, reply NONE: that's not worth a remark. "
         "Don't repeat, rephrase or bring up again anything you already said today:\n"
         f"{said}\n\nStart with one emotion tag in square brackets, like [laughing], [happy], "
         "[surprised], [thinking] or [silly]. No lists, no markdown, no emoji. If nothing is worth saying "
