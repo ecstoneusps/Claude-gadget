@@ -35,6 +35,8 @@ static constexpr uint32_t kBusyMaxMs = 180000;       // safety net if the assist
 static std::atomic<int> s_handBack{0};  // 1 = resume wake word, 2 = follow-up listening
 
 void voiceResume() { s_handBack.store(1); }
+static std::atomic<bool> s_cancelListen{false};
+void voiceCancel() { s_cancelListen.store(true); }
 void voiceFollowUp() { s_handBack.store(2); }
 
 static const esp_afe_sr_iface_t* s_afe = nullptr;
@@ -96,6 +98,7 @@ static void detectTask(void*) {
         s_afe->enable_wakenet(s_afeData);
     };
     auto startStream = [&](bool isFollowUp) {
+        s_cancelListen.store(false);
         mode = Mode::Stream;
         followUp = isFollowUp;
         heard = false;
@@ -156,14 +159,15 @@ static void detectTask(void*) {
             const bool patient = assistantWantsLongAnswer();
             const uint32_t endSilence = patient ? 2000 : kEndSilenceMs;
             const uint32_t startWindow = patient ? 10000 : followUp ? kFollowUpStartMs : kStartTalkingMs;
-            const bool done = sttDone || (heard && now - lastSpeech > endSilence) ||
+            const bool cancel = s_cancelListen.exchange(false);  // tapped: stop listening
+            const bool done = cancel || sttDone || (heard && now - lastSpeech > endSilence) ||
                               (!heard && now - since > startWindow) || now - since > kMaxUtteranceMs;
             if (done) {
-                const bool spoke = heard || sttDone;
+                const bool spoke = (heard || sttDone) && !cancel;
                 assistantEndAudio(spoke);
                 // A voice sample with nothing in it: the assistant asks again,
                 // so wait for it to hand back (as after an answer).
-                if (spoke || patient) {
+                if (spoke || (patient && !cancel)) {
                     mode = Mode::Busy;
                     since = now;
                 } else {

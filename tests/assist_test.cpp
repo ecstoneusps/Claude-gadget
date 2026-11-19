@@ -353,6 +353,11 @@ static void test_speaker_intro() {
     CHECK(isVoiceEnrollRequest("can you learn what I sound like?"));
     CHECK(!isVoiceEnrollRequest("what's my voice like"));
     CHECK(isVoiceForgetRequest("forget my voice please"));
+    CHECK(isClarifyRequest("I'm not sure I understand what you're asking about. Could you clarify or rephrase that?"));
+    CHECK(isClarifyRequest("I'm not sure I caught that part. Could you say it again or rephrase it? I'd love to help!"));
+    CHECK(isClarifyRequest("I don't see a shirt or anything on top. Maybe you could clarify what you mean? I'm here to help, but I'm not sure I'm following!"));
+    CHECK(!isClarifyRequest("The time is 8:12 PM. As for the chicken or the egg, the egg came first."));
+    CHECK(!isClarifyRequest("Saturn has 146 known moons. Do you want to hear about the biggest one?"));
     CHECK(isCancelRequest("Cancel."));
     CHECK(isCancelRequest("Never mind"));
     CHECK(isCancelRequest("Hey Buddy, cancel"));

@@ -119,6 +119,11 @@ static void handleTouch(uint32_t now) {
         buddy.onHold(now);
         hassEvent("petted", now);
     } else if (t.wasClicked()) {
+        // In a conversation, a tap cancels it (he misheard a video, say).
+        if (aiStarted.load() && assistantCancel()) {
+            ESP_LOGI(TAG, "tap: conversation cancelled");
+            return;
+        }
         buddy.onTap(now);
         hassEvent("tapped", now);
     }

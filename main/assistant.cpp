@@ -571,6 +571,10 @@ static bool speakPiece(const std::string& text, bool* begun) {
     return true;
 }
 
+// Tapped the screen to cancel: stop talking, don't listen for a follow-up.
+// Set from the UI task; cleared when a new "Hey Buddy" turn starts.
+static std::atomic<bool> s_cancelled{false};
+
 static void speakerTask(void*) {
     bool begun = false;
     while (true) {
@@ -580,6 +584,10 @@ static void speakerTask(void*) {
             if (begun) soundSpeechEnd();
             begun = false;
             s_sayDoneGen.store(item.gen);
+            continue;
+        }
+        if (s_cancelled.load()) {  // tapped to cancel: skip the rest of the reply
+            delete item.text;
             continue;
         }
         if (s_ready.load() && speakPiece(*item.text, &begun)) s_sayAudio.store(true);
@@ -993,7 +1001,7 @@ static void deliverReply(const std::string& reply, bool micsWaiting) {
     const uint32_t gen = sayEnd();
     for (int waited = 0; s_sayDoneGen.load() != gen && waited < 180000; waited += 20) vTaskDelay(pdMS_TO_TICKS(20));
     const bool spoke = s_sayAudio.load();
-    if (anything && !spoke) post(AssistEvent::Error, "couldn't get the spoken reply");
+    if (anything && !spoke && !s_cancelled.load()) post(AssistEvent::Error, "couldn't get the spoken reply");
     if (spoke) {
         while (soundSpeaking()) vTaskDelay(pdMS_TO_TICKS(20));
         vTaskDelay(pdMS_TO_TICKS(250));  // let the speaker's echo die away before listening
@@ -1001,8 +1009,18 @@ static void deliverReply(const std::string& reply, bool micsWaiting) {
     if (spoke || !anything) post(AssistEvent::Done);  // (a failure already showed confusion)
     s_turnActive.store(false);
     if (!micsWaiting) return;
-    const bool listenAgain = s_cfg.followUp || s_forceFollowUp;
+    bool listenAgain = s_cfg.followUp || s_forceFollowUp;
     s_forceFollowUp = false;
+    if (s_cancelled.load()) {
+        ESP_LOGI(TAG, "-> cancelled (tap); back to waiting for \"Hey Buddy\"");
+        listenAgain = false;
+    } else if (listenAgain && isClarifyRequest(parts.speech)) {
+        // "I didn't catch that, could you rephrase?": often a video or the
+        // TV he misheard, and listening again would only hear more of it.
+        // If it was you, say "Hey Buddy" and ask again.
+        ESP_LOGI(TAG, "-> he didn't understand; not listening for a follow-up");
+        listenAgain = false;
+    }
     if (spoke && listenAgain && s_ready.load() && assistantBeginTurn(true)) {
         voiceFollowUp();
     } else {
@@ -1674,6 +1692,7 @@ bool assistantAvailable() { return s_ready.load() && !s_turnActive.load(); }
 const char* assistantStatus() { return s_status.load(); }
 
 bool assistantBeginTurn(bool followUp) {
+    if (!followUp) s_cancelled.store(false);  // a fresh "Hey Buddy"
     s_turnLen.store(0);
     ++s_turnGen;
     if (!s_ready.load()) return false;
@@ -1743,4 +1762,12 @@ void assistantLook(uint8_t* jpeg, size_t len, const std::string& question, bool 
     s_lookSaved = saved;
     std::string* m = &s_lookMarker;
     xQueueSend(s_inbox, &m, pdMS_TO_TICKS(100));
+}
+
+bool assistantCancel() {
+    if (!s_turnActive.load() && !soundSpeaking()) return false;  // no conversation going on
+    s_cancelled.store(true);
+    soundStopSpeech();
+    voiceCancel();  // if it's listening, stop
+    return true;
 }

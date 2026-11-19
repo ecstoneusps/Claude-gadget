@@ -38,6 +38,10 @@ Home Assistant side step by step.
   the room), so he drops it quietly, without answering, and goes back to
   waiting for "Hey Buddy". ("Forget it" is different: it forgets the last
   thing you asked him to remember.)
+- **Tap his screen** during a conversation to cancel it, even with a video
+  playing: he stops talking (or listening) and goes back to waiting for
+  "Hey Buddy". When he answers that he didn't understand ("could you say it
+  again?"), he doesn't keep listening: say "Hey Buddy" and ask again.
 
 Fill in `wifi_name`, `wifi_password`, `ha_url` and `ha_token` in `settings.txt`
 (see [Settings](#settings-microsd-card)). Keep the card private: the token works

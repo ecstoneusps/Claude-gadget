@@ -118,6 +118,15 @@ class Diary:
         lines = self.lines[-last:] if last else self.lines
         return "\n".join(f"{l['time']} {l['what']}" for l in lines)
 
+    def split(self, minutes=30, now=None):
+        """(earlier lines, lines from the last `minutes`) as text."""
+        now = now or dt.datetime.now()
+        cut = (now - dt.timedelta(minutes=minutes)).strftime("%H:%M")
+        old = [l for l in self.lines if l["time"] < cut]
+        new = [l for l in self.lines if l["time"] >= cut]
+        fmt = lambda ls: "\n".join(f"{l['time']} {l['what']}" for l in ls)
+        return fmt(old), fmt(new)
+
     def save(self):
         try:
             with open(self.path, "w", encoding="utf-8") as f:
@@ -226,9 +235,13 @@ def remark(cfg, diary, reason):
     """Asks the chat model for one remark (or None)."""
     now = dt.datetime.now().strftime("%H:%M")
     said = "\n".join(diary.remarks[-8:]) or "(nothing yet)"
+    earlier, lately = diary.split()
     task = (
-        f"It's {now}. Your diary of what you've seen at the desk today (time, what was going on):\n"
-        f"{diary.text()}\n\n{reason}\n\n"
+        f"It's {now}. Your diary of what you've seen at the desk today (time, what was going on).\n"
+        f"Earlier today (background only: counts and patterns, it's over now):\n{earlier or '(nothing)'}\n\n"
+        f"In the last 30 minutes:\n{lately or '(nothing)'}\n\n{reason}\n\n"
+        "Your remark must be about something from the last 30 minutes (earlier lines can add a count or a "
+        "pattern, like how many times today). Don't talk about earlier things as if they're happening now.\n\n"
         + (f"Things you know about {cfg['owner']} (only use one when the diary shows something it's about, "
            f"to make the joke land): {cfg['about_owner']}\n\n" if cfg["about_owner"] else "")
         +
@@ -311,6 +324,7 @@ def clean_remark(reply):
     if not r or re.fullmatch(r"(\[[a-z ]+\]\s*)?NONE\.?", r, flags=re.I):
         return None
     r = re.sub(r"[*_`#]+", "", r)  # markdown emphasis would be read out or look odd
+    r = re.sub(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]", "", r).strip()  # emoji
     if len(r) > 300:  # too long for a passing remark
         return None
     return r
@@ -545,7 +559,7 @@ def main():
                     if r and too_similar(r, diary.remarks):
                         log(f"(skipped a repeat: {r})")
                         r = None
-                    if r and (thing := invented(r, diary.text())):
+                    if r and (thing := invented(r, diary.split()[1])):
                         log(f"(skipped, made up \"{thing}\": {r})")
                         r = None
                     if not r and not visitor and random.uniform(0, 100) < cfg["thoughts"]:

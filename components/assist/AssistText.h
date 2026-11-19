@@ -58,6 +58,10 @@ bool isVoiceForgetRequest(const std::string& heard);
 // quietly. Only short sentences count, so "can you cancel my alarm and..."
 // still goes to the AI.
 bool isCancelRequest(const std::string& heard);
+
+// The AI's reply only asks you to repeat or rephrase ("I didn't catch that,
+// could you say it again?"): no follow-up listening after it.
+bool isClarifyRequest(const std::string& reply);
 struct SpeakerIntro {
     enum Kind { None, Owner, Guest } kind = None;
     std::string name;  // Guest: their name ("Sarah"); may be empty

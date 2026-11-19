@@ -56,7 +56,10 @@ struct AssistEvent {
 // and looks up the voice assistant. Returns false if the settings are unusable.
 bool assistantStart(const AssistantConfig& cfg, QueueHandle_t events);
 
-bool assistantAvailable();   // connected, logged in, voice assistant found, not mid-turn
+bool assistantAvailable();
+// Tap to cancel: stops what he's saying and doesn't listen for a follow-up
+// (or stops listening). False if no conversation was going on.
+bool assistantCancel();   // connected, logged in, voice assistant found, not mid-turn
 const char* assistantStatus();
 
 // For voice.cpp. beginTurn returns false if a turn can't start now (then the

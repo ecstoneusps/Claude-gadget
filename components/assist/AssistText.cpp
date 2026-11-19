@@ -287,6 +287,21 @@ bool isCancelRequest(const std::string& heard) {
     return false;
 }
 
+bool isClarifyRequest(const std::string& reply) {
+    const std::string r = " " + normalizeSpeech(reply) + " ";
+    size_t words = 0;
+    for (char c : r) if (c == ' ') ++words;
+    if (words > 30) return false;  // a real answer that happens to ask something
+    for (const char* p : {" rephrase ", " say it again ", " say that again ", " repeat that ", " repeat it ",
+                          " didnt catch ", " didnt quite catch ", " didnt quite get ", " didnt get that ",
+                          " not sure i understand ", " not sure i caught ", " not sure i follow ",
+                          " not sure what you mean ", " not sure what youre asking ", " not sure im following ",
+                          " dont understand ", " didnt understand ", " could you clarify ", " can you clarify ",
+                          " what do you mean ", " come again ", " pardon "})
+        if (r.find(p) != std::string::npos) return true;
+    return false;
+}
+
 namespace {
 std::vector<std::string> wordsOf(const std::string& text) {
     std::vector<std::string> out;

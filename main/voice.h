@@ -42,3 +42,4 @@ bool voiceSpeech();
 // "Hey Buddy") or voiceFollowUp() (listen again straight away).
 void voiceResume();
 void voiceFollowUp();
+void voiceCancel();  // stop listening now (tap to cancel); it counts as nothing said
