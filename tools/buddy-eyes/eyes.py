@@ -178,7 +178,8 @@ def look(cfg, jpg):
         f"The activity is only about {cfg['owner']} and what's in their hands or right in front of them: "
         "things in the background behind them (counters, shelves, another room) aren't theirs. "
         "Describe only what you can clearly see in this picture; if you aren't sure what an object is, "
-        "leave it out rather than guess (a dark shape is not a mug, a keyboard is not a laptop)."
+        "leave it out rather than guess (a dark shape is not a mug, a keyboard is not a laptop, a blurry "
+        "moving hand isn't holding anything). Don't describe clothing: it isn't news."
     )
     reply = ollama_chat(cfg, cfg["vision_model"],
                         [{"role": "user", "content": prompt, "images": [base64.b64encode(jpg).decode()]}],
@@ -191,7 +192,7 @@ def _drop_echo(text):
     presence sensor (the vision model sometimes copies it back) or talk about
     the picture itself ("the image is blurry") instead of the desk."""
     parts = re.split(r"(?<=[.!?])\s+|\s*[()]\s*", text)
-    keep = [p for p in parts if p and not re.search(r"sensor|confirm|out of frame|poor light|image|picture|photo|webcam|camera|blurr|difficult to|hard to tell", p, re.I)]
+    keep = [p for p in parts if p and not re.search(r"sensor|confirm|out of frame|poor light|image|picture|photo|webcam|camera|blurr|difficult to|hard to tell|wearing|shirt|hoodie|sweater|jacket|clothing|outfit", p, re.I)]
     return " ".join(keep).strip().rstrip(" .,;")
 
 
@@ -313,7 +314,7 @@ def clean_remark(reply):
 
 # Things the small chat model likes to make up. A remark mentioning one of
 # them is only allowed if the diary mentions it too.
-INVENTABLE = ("coffee", "tea", "drink", "mug", "cup", "soda", "beer", "water", "energy drink", "juice",
+INVENTABLE = ("coffee", "tea", "drink", "drinking", "mug", "cup", "glass", "bottle", "soda", "beer", "water", "energy drink", "juice",
               "donut", "doughnut", "snack", "chips", "cookie", "pizza", "sandwich", "burger", "candy",
               "chocolate", "face", "yawn", "phone", "laptop", "cat", "dog", "hat", "glasses")
 
