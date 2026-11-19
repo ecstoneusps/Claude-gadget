@@ -60,6 +60,7 @@ def load_config():
         "ollama": c.get("ollama_url", "http://localhost:11434").rstrip("/"),
         "vision_model": c.get("vision_model", "qwen2.5vl:7b").strip(),
         "chat_model": c.get("chat_model", "qwen3:4b-instruct").strip(),
+        "context_size": c.getint("context_size", 8192),
         "mqtt_host": c.get("mqtt_host").strip(),
         "mqtt_port": c.getint("mqtt_port", 1883),
         "mqtt_user": c.get("mqtt_user", "").strip(),
@@ -162,9 +163,15 @@ def snapshot(index):
 
 
 def ollama_chat(cfg, model, messages, json_format=False, timeout=120, temperature=None):
-    body = {"model": model, "messages": messages, "stream": False, "keep_alive": "10m"}
+    body = {"model": model, "messages": messages, "stream": False, "keep_alive": "10m", "options": {}}
     if temperature is not None:
-        body["options"] = {"temperature": temperature}
+        body["options"]["temperature"] = temperature
+    if model == cfg["chat_model"]:
+        # The same context size as Home Assistant and Buddy on the PC: then all
+        # three share one loaded copy of the chat model.
+        body["options"]["num_ctx"] = cfg["context_size"]
+        if "instruct" not in model:
+            body["think"] = False  # qwen3:8b would think it over silently first
     if json_format:
         body["format"] = "json"
     r = requests.post(f"{cfg['ollama']}/api/chat", json=body, timeout=timeout)
