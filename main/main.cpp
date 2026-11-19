@@ -40,6 +40,7 @@
 #include "cpustats.h"
 #include "i2c_bus.h"
 #include "memory.h"
+#include "cJSON.h"
 #include "proximity.h"
 #include "radar.h"
 #include "sdcard.h"
@@ -740,6 +741,62 @@ static void sayWhenFree(uint32_t now) {
     if (assistantSay(pendingSay)) pendingSay.clear();
 }
 
+// Memory notes shared with Buddy on the PC: a retained message on Home
+// Assistant's MQTT broker holds the latest version. Newer than ours: use it.
+// Ours newer (changed while the broker was out of reach), or nothing shared
+// yet: share ours. Every change made here is shared straight away.
+static void syncMemories(uint32_t now) {
+    static uint32_t connectedAt = 0;
+    static bool decided = false;  // since connecting: heard the shared copy, or shared ours
+    if (!config.memory) return;
+    if (!hassConnected()) {
+        connectedAt = 0;
+        decided = false;
+        return;
+    }
+    if (connectedAt == 0) connectedAt = now ? now : 1;
+
+    auto share = [](bool newer) {
+        memoryMarkChanged(newer);
+        memoryTakeChanged();
+        cJSON* j = cJSON_CreateObject();
+        cJSON_AddNumberToObject(j, "version", memoryVersion());
+        cJSON_AddStringToObject(j, "from", "desk");
+        cJSON_AddStringToObject(j, "notes", memoryText().c_str());
+        char* s = cJSON_PrintUnformatted(j);
+        const bool ok = s && hassPublishMemories(s);
+        ESP_LOGI(TAG, "%s the memory notes (version %u)", ok ? "shared" : "couldn't share",
+                 (unsigned)memoryVersion());
+        if (!ok) memoryMarkChanged(false);  // try again later
+        cJSON_free(s);
+        cJSON_Delete(j);
+    };
+
+    std::string payload;
+    if (hassTakeMemories(payload)) {
+        decided = true;
+        cJSON* j = cJSON_Parse(payload.c_str());
+        const cJSON* v = j ? cJSON_GetObjectItem(j, "version") : nullptr;
+        const cJSON* n = j ? cJSON_GetObjectItem(j, "notes") : nullptr;
+        if (cJSON_IsNumber(v) && cJSON_IsString(n)) {
+            const uint32_t theirs = (uint32_t)v->valuedouble;
+            if (!memoryApply(theirs, n->valuestring)) {
+                const uint32_t ours = memoryVersion();
+                // Ours is newer, or the same version with different notes
+                // (both changed while apart): ours goes out as the newest.
+                if (ours > theirs || (ours == theirs && memoryText() != n->valuestring)) share(ours == theirs);
+            }
+        }
+        cJSON_Delete(j);
+    }
+    // Nothing shared yet after a few seconds connected: share ours.
+    if (!decided && now - connectedAt > 5000) {
+        decided = true;
+        if (memoryCount() > 0 || memoryVersion() > 0) share(false);
+    }
+    if (decided && memoryTakeChanged()) share(false);
+}
+
 // Home Assistant (MQTT): send what he senses, carry out what it asks.
 static void handleHass(uint32_t now, bool dimmed) {
     HassCommand cmd;
@@ -883,6 +940,7 @@ static void uiTask(void*) {
         }
         handleVolumeChange(now);
         handleHass(now, dimmed);
+        syncMemories(now);
         sayWhenFree(now);
         memoryService();  // save notes to the SD card if they changed
         photoNotesService();  // and new photo descriptions

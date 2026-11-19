@@ -330,7 +330,7 @@ void webuiAccept() {
         s_hasPending = false;
     }
     const bool ok = sdcardWriteFile(file, text);
-    if (ok && strcmp(file, kMemoriesFile) == 0) memoryLoad();  // so a background save can't undo the edit
+    if (ok && strcmp(file, kMemoriesFile) == 0) memoryLoad(true);  // so a background save can't undo the edit
     ESP_LOGI(TAG, "new %s %s", file, ok ? "accepted and saved" : "accepted, but COULDN'T be saved to the SD card");
     std::lock_guard<std::mutex> g(s_lock);
     s_result = ok ? "accepted" : "declined";

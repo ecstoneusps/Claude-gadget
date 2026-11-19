@@ -160,7 +160,20 @@ static void command(HassCommand::Type type, int value, const std::string& text =
     if (xQueueSend(s_commands, &c, 0) != pdTRUE) delete c;
 }
 
+// The shared memory notes (retained on the broker), for the UI task.
+static std::string s_memories;
+static bool s_memoriesNew = false;
+static portMUX_TYPE s_memLock = portMUX_INITIALIZER_UNLOCKED;
+
 static void onMessage(const std::string& t, const std::string& data) {
+    if (t == s_base + "/memories") {
+        std::string copy = data;  // (no allocation inside the spinlock)
+        taskENTER_CRITICAL(&s_memLock);
+        s_memories.swap(copy);
+        s_memoriesNew = true;
+        taskEXIT_CRITICAL(&s_memLock);
+        return;
+    }
     if (t == "homeassistant/status") {  // Home Assistant restarted: announce everything again
         if (data == "online") s_sendAll.store(true);
         return;
@@ -186,6 +199,7 @@ static void onMqttEvent(void*, esp_event_base_t, int32_t id, void* data) {
             esp_mqtt_client_subscribe(s_mqtt, (s_base + "/+/set").c_str(), 0);
             esp_mqtt_client_subscribe(s_mqtt, (s_base + "/+/press").c_str(), 0);
             esp_mqtt_client_subscribe(s_mqtt, "homeassistant/status", 0);
+            esp_mqtt_client_subscribe(s_mqtt, (s_base + "/memories").c_str(), 1);
             s_sendAll.store(true);
             break;
         case MQTT_EVENT_DISCONNECTED:
@@ -195,11 +209,28 @@ static void onMqttEvent(void*, esp_event_base_t, int32_t id, void* data) {
             if (ev && ev->error_handle && ev->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED)
                 ESP_LOGW(TAG, "the MQTT broker refused the login (check mqtt_user / mqtt_password)");
             break;
-        case MQTT_EVENT_DATA:
-            // Small messages arrive whole; ignore anything split into parts.
-            if (ev->current_data_offset == 0 && ev->data_len == ev->total_data_len)
-                onMessage(std::string(ev->topic, ev->topic_len), std::string(ev->data, ev->data_len));
+        case MQTT_EVENT_DATA: {
+            // Bigger messages (the shared notes) arrive in parts: put them
+            // back together. Only the first part carries the topic.
+            static std::string partTopic, partData;
+            if (ev->current_data_offset == 0) {
+                partTopic.assign(ev->topic, ev->topic_len);
+                partData.clear();
+                if (ev->total_data_len > 32768) {  // far bigger than anything expected
+                    partTopic.clear();
+                    break;
+                }
+                partData.reserve(ev->total_data_len);
+            }
+            if (partTopic.empty()) break;
+            partData.append(ev->data, ev->data_len);
+            if ((int)partData.size() >= ev->total_data_len) {
+                onMessage(partTopic, partData);
+                partTopic.clear();
+                partData.clear();
+            }
             break;
+        }
         default:
             break;
     }
@@ -325,4 +356,26 @@ bool hassTakeCommand(HassCommand& out) {
     out = *c;
     delete c;
     return true;
+}
+
+bool hassTakeMemories(std::string& payload) {
+    bool got = false;
+    std::string data;
+    taskENTER_CRITICAL(&s_memLock);
+    if (s_memoriesNew) {
+        s_memoriesNew = false;
+        data.swap(s_memories);
+        got = true;
+    }
+    taskEXIT_CRITICAL(&s_memLock);
+    if (got) payload.swap(data);
+    return got;
+}
+
+bool hassPublishMemories(const std::string& payload) {
+    if (!s_mqtt || !s_connected.load()) return false;
+    // Retained, so whoever connects next (Buddy on the PC, or he himself after
+    // a restart) gets the latest notes. Sent from here, not the sender task,
+    // which only takes small messages.
+    return esp_mqtt_client_publish(s_mqtt, topic("memories").c_str(), payload.data(), (int)payload.size(), 0, 1) >= 0;
 }

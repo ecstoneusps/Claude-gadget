@@ -209,6 +209,15 @@ dog's name?" gets "King!" (the vision model sees them too).
   screen) or on your computer. Lines starting with `#` are ignored.
 - `memory = off` in settings.txt turns notes off altogether.
 
+### Shared with Buddy on the PC
+
+With Home Assistant's MQTT set up (see [In Home Assistant](#in-home-assistant-mqtt)),
+his notes are also kept as a retained message on the broker
+(`buddy/<device>/memories`), so [Buddy on the PC](https://github.com/ecstoneusps/buddy-pc)
+shares them, even while one of them is off. Each change gets a higher version
+number and the newest one wins: changes made while he was off reach him when
+he starts.
+
 ## Taking pictures and seeing
 
 The camera stays off until you ask for it (with `face_tracking = off`, the

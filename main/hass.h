@@ -45,3 +45,9 @@ struct HassCommand {
     std::string text;   // Say
 };
 bool hassTakeCommand(HassCommand& out);
+
+// The memory notes shared with Buddy on the PC: a retained JSON message
+// {"version": N, "from": "desk"|"pc", "notes": "<memories.txt>"} on
+// buddy/<node>/memories. Take the latest one received (UI task), or publish ours.
+bool hassTakeMemories(std::string& payload);
+bool hassPublishMemories(const std::string& payload);
