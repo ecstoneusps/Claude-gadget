@@ -359,6 +359,8 @@ static void test_speaker_intro() {
     CHECK(!isClarifyRequest("The time is 8:12 PM. As for the chicken or the egg, the egg came first."));
     CHECK(!isClarifyRequest("Saturn has 146 known moons. Do you want to hear about the biggest one?"));
     CHECK(isCancelRequest("Cancel."));
+    CHECK(isCancelRequest("Cancer."));
+    CHECK(!isCancelRequest("Tell me about cancer."));
     CHECK(isCancelRequest("Never mind"));
     CHECK(isCancelRequest("Hey Buddy, cancel"));
     CHECK(isCancelRequest("nevermind buddy"));

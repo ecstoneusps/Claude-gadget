@@ -556,6 +556,20 @@ static void test_conversation_listen_think_speak() {
     CHECK(r.expr() == Expression::Neutral);
 }
 
+static void test_lost_reply_done_doesnt_stick() {
+    Rig r;
+    r.c.onReply("silly", r.now);
+    r.c.setSpeaking(true, 0.8f);
+    r.run(5000);
+    r.c.setSpeaking(false, 0);  // finished talking, but the "done" never came
+    r.run(10000);
+    CHECK(r.c.isReplying());    // a pause between sentences is fine
+    r.run(15000);
+    CHECK(!r.c.isReplying());   // after 20 s of silence the reply face lets go
+    r.run(5000);
+    CHECK(r.expr() == Expression::Neutral);
+}
+
 static void test_reply_without_tag_is_happy() {
     Rig r;
     r.c.onHeard(r.now);
@@ -790,6 +804,7 @@ int main() {
         {"no clap reaction while replying", test_no_clap_reaction_while_replying},
         {"action commands", test_action_commands},
         {"volume commands", test_volume_commands},
+        {"lost reply done doesn't stick", test_lost_reply_done_doesnt_stick},
         {"mouth follows real sound level", test_mouth_follows_real_sound_level},
         {"camera commands", test_camera_commands},
         {"dirty canvas matches full redraw", test_dirty_canvas_matches_full_redraw},

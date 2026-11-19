@@ -267,7 +267,8 @@ bool isCancelRequest(const std::string& heard) {
     }
     // The whole thing is one of these.
     // ("Forget it" / "never mind that" are memory commands, "stop it" a scolding.)
-    for (const char* p : {"cancel", "cancel that", "cancel it", "never mind", "nevermind", "stop", "stop listening",
+    // ("Cancer" alone: Whisper's usual mishearing of "cancel".)
+    for (const char* p : {"cancel", "cancer", "cancel that", "cancel it", "never mind", "nevermind", "stop", "stop listening",
                           "ignore that", "ignore it", "ignore me", "not you", "not now", "nothing", "nobody",
                           "no one", "nobody's talking to you", "no one's talking to you"})
         if (h == normalizeSpeech(p)) return true;

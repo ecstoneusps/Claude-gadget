@@ -1006,12 +1006,13 @@ static void deliverReply(const std::string& reply, bool micsWaiting) {
         while (soundSpeaking()) vTaskDelay(pdMS_TO_TICKS(20));
         vTaskDelay(pdMS_TO_TICKS(250));  // let the speaker's echo die away before listening
     }
-    if (spoke || !anything) post(AssistEvent::Done);  // (a failure already showed confusion)
+    const bool cancelled = s_cancelled.exchange(false);  // this conversation is over either way
+    if (spoke || !anything || cancelled) post(AssistEvent::Done);  // (a failure already showed confusion)
     s_turnActive.store(false);
     if (!micsWaiting) return;
     bool listenAgain = s_cfg.followUp || s_forceFollowUp;
     s_forceFollowUp = false;
-    if (s_cancelled.load()) {
+    if (cancelled) {
         ESP_LOGI(TAG, "-> cancelled (tap); back to waiting for \"Hey Buddy\"");
         listenAgain = false;
     } else if (listenAgain && isClarifyRequest(parts.speech)) {
@@ -1737,6 +1738,7 @@ bool assistantSay(const std::string& text) {
     if (!s_inbox || !s_ready.load()) return false;
     bool expected = false;
     if (!s_turnActive.compare_exchange_strong(expected, true)) return false;  // mid-conversation
+    s_cancelled.store(false);  // something new to say (an old tap doesn't silence it)
     s_sayText = text;
     std::string* m = &s_sayMarker;
     if (xQueueSend(s_inbox, &m, pdMS_TO_TICKS(100)) != pdTRUE) {

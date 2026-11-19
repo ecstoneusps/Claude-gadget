@@ -456,6 +456,10 @@ void Companion::onCommandTimeout(uint32_t now) {
 void Companion::update(uint32_t now) {
     // A conversation in progress keeps it awake.
     if (thinking_ && now - thinkingSince_ > thinkingTimeoutMs) thinking_ = false;
+    // A reply whose end never arrived (a lost "done"): don't keep its face
+    // forever. Speech keeps it going; 20 s of silence ends it.
+    if (speaking_ || !replying_) replyQuietSince_ = now;
+    else if (now - replyQuietSince_ > 20000) replying_ = false;
     if (thinking_ || replying_ || speaking_) lastInteraction_ = now;
 
     // Someone at the desk keeps it awake; it starts counting down once they've gone.

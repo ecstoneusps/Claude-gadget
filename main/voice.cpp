@@ -20,6 +20,7 @@
 #include "assistant.h"
 #include "audio_io.h"
 #include "esp_timer.h"
+#include "sound.h"
 
 static const char* TAG = "voice";
 
@@ -129,6 +130,12 @@ static void detectTask(void*) {
             }
         }
 
+        // His own voice can sound like "Hey Buddy" to the wake word model:
+        // ignore it while he's talking (tap the screen to stop him instead).
+        if (res->wakeup_state == WAKENET_DETECTED && soundSpeaking()) {
+            ESP_LOGI(TAG, "wake word while he's talking; ignored");
+            continue;
+        }
         if (res->wakeup_state == WAKENET_DETECTED) {
             s_afe->disable_wakenet(s_afeData);  // don't re-trigger while listening
             s_handBack.store(0);                // left over from an earlier turn

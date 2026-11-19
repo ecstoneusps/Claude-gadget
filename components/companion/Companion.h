@@ -205,6 +205,7 @@ private:
     bool thinking_ = false;
     uint32_t thinkingSince_ = 0;
     bool replying_ = false;
+    uint32_t replyQuietSince_ = 0;
     Expression replyExpr_ = Expression::Happy;
     bool speaking_ = false;
     float speechLevel_ = 0;
