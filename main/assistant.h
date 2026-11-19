@@ -44,6 +44,7 @@ struct AssistEvent {
         WakeAgain, // you only said "Hey Buddy" (during a follow-up): it listens again
         Look,      // you asked about what it sees (`text`): take a photo, then assistantLook()
         LookSaved, // you asked about a photo it took (`text`): load the newest one, then assistantLook(..., saved = true)
+        Cancelled, // "cancel" / "never mind" / "I wasn't talking to you": the conversation is dropped
     } type;
     bool followUp;
     int command;

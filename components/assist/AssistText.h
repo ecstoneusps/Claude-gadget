@@ -52,6 +52,12 @@ size_t sentenceEnd(const std::string& text, size_t from);
 // who you are: "this is my friend Sarah", "my name is Sarah", "it's me".
 bool isVoiceEnrollRequest(const std::string& heard);
 bool isVoiceForgetRequest(const std::string& heard);
+
+// "Cancel", "never mind", "I wasn't talking to you", "that was the TV"...:
+// he misheard (a video, someone else) and should drop the conversation
+// quietly. Only short sentences count, so "can you cancel my alarm and..."
+// still goes to the AI.
+bool isCancelRequest(const std::string& heard);
 struct SpeakerIntro {
     enum Kind { None, Owner, Guest } kind = None;
     std::string name;  // Guest: their name ("Sarah"); may be empty

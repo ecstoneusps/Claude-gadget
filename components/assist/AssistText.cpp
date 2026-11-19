@@ -257,6 +257,36 @@ bool isVoiceForgetRequest(const std::string& heard) {
     return h.find(" forget my voice ") != std::string::npos || h.find(" forget what i sound like ") != std::string::npos;
 }
 
+bool isCancelRequest(const std::string& heard) {
+    std::string h = normalizeSpeech(heard);
+    for (const char* wake : {"hey buddy ", "hi buddy ", "okay buddy ", "ok buddy ", "buddy "})
+        if (h.rfind(wake, 0) == 0) h = h.substr(strlen(wake));
+    for (const char* tail : {" buddy", " please", " thanks", " thank you"}) {
+        const size_t n = strlen(tail);
+        if (h.size() > n && h.compare(h.size() - n, n, tail) == 0) h.resize(h.size() - n);
+    }
+    // The whole thing is one of these.
+    // ("Forget it" / "never mind that" are memory commands, "stop it" a scolding.)
+    for (const char* p : {"cancel", "cancel that", "cancel it", "never mind", "nevermind", "stop", "stop listening",
+                          "ignore that", "ignore it", "ignore me", "not you", "not now", "nothing", "nobody",
+                          "no one", "nobody's talking to you", "no one's talking to you"})
+        if (h == normalizeSpeech(p)) return true;
+    // Or contains one of these, in a short sentence.
+    size_t words = h.empty() ? 0 : 1;
+    for (char c : h) if (c == ' ') ++words;
+    if (words > 10) return false;
+    const std::string s = " " + h + " ";
+    for (const char* p : {" wasn't talking to you ", " was not talking to you ", " not talking to you ",
+                          " that wasn't me ", " it wasn't me ", " that was not me ", " wasn't me talking ",
+                          " that was the tv ", " that was the video ", " that was a video ", " that was youtube ",
+                          " that was the television ", " it was the tv ", " it was the video ", " it was a video ",
+                          " it was youtube ", " talking to someone else ", " not talking to you ",
+                          " you misheard ", " i didn't say anything ", " i didn't call you ",
+                          " i didn't say your name "})
+        if (s.find(" " + normalizeSpeech(p) + " ") != std::string::npos) return true;
+    return false;
+}
+
 namespace {
 std::vector<std::string> wordsOf(const std::string& text) {
     std::vector<std::string> out;

@@ -33,6 +33,11 @@ Home Assistant side step by step.
 - Without Wi-Fi, or if Home Assistant can't be reached, it falls back to the
   built-in commands.
 - "Be quiet" turns off its sound effects, but it still speaks its answers.
+- **"Cancel"**, **"never mind"**, "stop listening", "I wasn't talking to you"
+  or "that was the TV/video/YouTube": he misheard (a video, someone else in
+  the room), so he drops it quietly, without answering, and goes back to
+  waiting for "Hey Buddy". ("Forget it" is different: it forgets the last
+  thing you asked him to remember.)
 
 Fill in `wifi_name`, `wifi_password`, `ha_url` and `ha_token` in `settings.txt`
 (see [Settings](#settings-microsd-card)). Keep the card private: the token works

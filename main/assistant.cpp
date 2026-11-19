@@ -848,6 +848,15 @@ static void handleHeard(const std::string& text) {
         else voiceResume();
         return;
     }
+    // "Cancel" / "never mind" / "I wasn't talking to you": he misheard (a
+    // video, someone else). Drop it quietly and wait for "Hey Buddy" again,
+    // instead of answering and listening for more.
+    if (isCancelRequest(text)) {
+        ESP_LOGI(TAG, "-> cancelled; back to waiting for \"Hey Buddy\"");
+        post(AssistEvent::Cancelled);
+        endTurnAndResume();
+        return;
+    }
     if (!s_cfg.voiceIdUrl.empty() && (isVoiceEnrollRequest(text) || isVoiceForgetRequest(text))) {
         const bool forget = isVoiceForgetRequest(text);
         if (awayFromHome()) {

@@ -354,6 +354,7 @@ static void handleAssistant(uint32_t now) {
             case AssistEvent::WakeAgain: buddy.onWakeWord(now); break;
             case AssistEvent::Look: startPhoto(true, ev.text, true, now); break;
             case AssistEvent::LookSaved: lookAtSavedPhoto(ev.text); break;
+            case AssistEvent::Cancelled: buddy.onFollowUpEnd(now); break;
         }
     }
     buddy.setSpeaking(soundSpeaking(), soundSpeechLevel());

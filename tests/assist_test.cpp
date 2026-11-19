@@ -353,6 +353,21 @@ static void test_speaker_intro() {
     CHECK(isVoiceEnrollRequest("can you learn what I sound like?"));
     CHECK(!isVoiceEnrollRequest("what's my voice like"));
     CHECK(isVoiceForgetRequest("forget my voice please"));
+    CHECK(isCancelRequest("Cancel."));
+    CHECK(isCancelRequest("Never mind"));
+    CHECK(isCancelRequest("Hey Buddy, cancel"));
+    CHECK(isCancelRequest("nevermind buddy"));
+    CHECK(isCancelRequest("I wasn't talking to you."));
+    CHECK(isCancelRequest("Buddy, I was not talking to you, that was the video"));
+    CHECK(isCancelRequest("No, that was YouTube."));
+    CHECK(isCancelRequest("It wasn't me, it was the TV!"));
+    CHECK(isCancelRequest("Stop listening."));
+    CHECK(!isCancelRequest("forget it"));         // memory command
+    CHECK(!isCancelRequest("never mind that"));   // memory command
+    CHECK(!isCancelRequest("stop it"));           // scolding
+    CHECK(!isCancelRequest("Can you cancel my dentist appointment reminder and tell me what time it is?"));
+    CHECK(!isCancelRequest("Who was the first person to walk on the moon?"));
+    CHECK(!isCancelRequest("I wasn't talking to you earlier when I said that the movie we watched last night was really good"));
     auto g = parseSpeakerIntro("Hey Buddy, this is my friend Sarah!", "Eric");
     CHECK(g.kind == SpeakerIntro::Guest && g.name == "Sarah");
     g = parseSpeakerIntro("this is Tom", "Eric");
