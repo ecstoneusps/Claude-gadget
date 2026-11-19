@@ -175,6 +175,8 @@ def look(cfg, jpg):
         'posters), '
         '"activity": one short sentence about what ' + cfg["owner"] + " is doing, eating, drinking or holding, "
         '"notable": something clearly visible and out of the ordinary, or "" (usually "")}. '
+        f"The activity is only about {cfg['owner']} and what's in his hands or right in front of him: "
+        "things in the background behind him (counters, shelves, another room) aren't his. "
         "Describe only what you can clearly see in this picture; if you aren't sure what an object is, "
         "leave it out rather than guess (a dark shape is not a mug, a keyboard is not a laptop)."
     )
