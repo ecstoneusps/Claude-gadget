@@ -217,6 +217,33 @@ def _drop_echo(text):
 # Things the vision model keeps "seeing" that aren't there (not_there in
 # eyes.ini): taken out of every diary line.
 NOT_THERE = []
+# The desk notes: a small vision model repeats them back as if it saw them
+# ("Eric's red cup holding chocolate milk"), so anything copied from them goes.
+DESK_NOTES = [""]
+
+
+_SMALL = set("the a an and or of to in on at is are his her their its with from for by it this that "
+             "eric always never so none those".split())
+
+
+def copies_notes(text, notes=None):
+    """True if `text` is mostly words from one of the desk notes ("Eric's red
+    cup holding chocolate milk" from "his red cup always holds chocolate milk")."""
+    notes = DESK_NOTES[0] if notes is None else notes
+    words = lambda s: {w for w in re.findall(r"[a-z0-9]+", s.lower().replace("'s", "")) if w not in _SMALL}
+    t = words(text)
+    if len(t) < 2:
+        return False
+    for clause in re.split(r"[.;:]", notes):
+        shared = len(t & words(clause))
+        if shared >= 3 and shared >= 0.6 * len(t):
+            return True
+    return False
+
+
+def drop_copied(text):
+    parts = re.split(r"(?<=[.!?,;])\s+|\s*[()]\s*", text)
+    return " ".join(p for p in parts if p and not copies_notes(p)).strip().rstrip(" .,;")
 
 
 def remove_absent(text, words=None):
@@ -248,8 +275,8 @@ def parse_look(reply):
         people = int(d.get("people", 0))
     except (TypeError, ValueError):
         people = 0
-    activity = remove_absent(_drop_echo(str(d.get("activity", ""))))
-    notable = remove_absent(_drop_echo(str(d.get("notable", ""))))
+    activity = remove_absent(drop_copied(_drop_echo(str(d.get("activity", "")))))
+    notable = remove_absent(drop_copied(_drop_echo(str(d.get("notable", "")))))
     # Buddy's eyes only looks while the radar says someone is at the desk, so
     # "nobody there" is the camera missing them (out of frame, dark), not news.
     if not activity or re.search(r"\b(nobody|no one|no-one|empty|no person|not visible)\b", activity, re.I):
@@ -583,6 +610,7 @@ def in_quiet_hours(cfg, now=None):
 def main():
     cfg = load_config()
     NOT_THERE[:] = cfg["not_there"]
+    DESK_NOTES[0] = cfg["desk_notes"]
     diary = Diary(DIARY_FILE)
     buddy = Buddy(cfg)
     log(f"Buddy's eyes: camera {cfg['camera']}, vision {cfg['vision_model']}, chat {cfg['chat_model']}")
