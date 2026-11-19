@@ -33,6 +33,11 @@ shape for a mug, a keyboard for a laptop). In `eyes.ini`:
 
 Then delete `diary.json` so the mistaken lines are gone, and restart.
 
+`about_owner` gives his remarks something to joke with, e.g. `about_owner =
+Eric drinks about a gallon of chocolate milk a day, always from his red cup`.
+He only uses it when the diary shows something it's about (put the red cup in
+`desk_notes` too, so the vision model writes "chocolate milk" when it sees it).
+
 ## In Home Assistant
 
 On the **Desk Buddy** device:

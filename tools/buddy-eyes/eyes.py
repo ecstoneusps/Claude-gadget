@@ -68,6 +68,7 @@ def load_config():
         "remark_every": c.getint("remark_every_minutes", 30),
         "thoughts": max(0, min(100, c.getint("thoughts_percent", 40))),
         "desk_notes": c.get("desk_notes", "").strip(),
+        "about_owner": c.get("about_owner", "").strip(),
         "save_picture": c.getboolean("save_last_picture", False),
         "quiet_from": c.get("quiet_hours_from", "23:00").strip(),
         "quiet_to": c.get("quiet_hours_to", "07:00").strip(),
@@ -228,6 +229,9 @@ def remark(cfg, diary, reason):
     task = (
         f"It's {now}. Your diary of what you've seen at the desk today (time, what was going on):\n"
         f"{diary.text()}\n\n{reason}\n\n"
+        + (f"Things you know about {cfg['owner']} (only use one when the diary shows something it's about, "
+           f"to make the joke land): {cfg['about_owner']}\n\n" if cfg["about_owner"] else "")
+        +
         "Say one short, natural remark out loud to " + cfg["owner"] + " about what you've noticed: funny, "
         "teasing or kind, one or two sentences, like a friend glancing over. Patterns over the day make the "
         "best remarks. Only mention things that are written in the diary: never invent food, drinks, "
@@ -316,7 +320,7 @@ def clean_remark(reply):
 # them is only allowed if the diary mentions it too.
 INVENTABLE = ("coffee", "tea", "drink", "drinking", "mug", "cup", "glass", "bottle", "soda", "beer", "water", "energy drink", "juice",
               "donut", "doughnut", "snack", "chips", "cookie", "pizza", "sandwich", "burger", "candy",
-              "chocolate", "face", "yawn", "phone", "laptop", "cat", "dog", "hat", "glasses")
+              "chocolate", "milk", "face", "yawn", "phone", "laptop", "cat", "dog", "hat", "glasses")
 
 
 def things_in(text):
