@@ -28,6 +28,7 @@ import cv2
 import paho.mqtt.client as mqtt
 import requests
 
+VERSION = "2026-11-19c"  # shown at startup, to check an update took
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(HERE, "eyes.ini")
 DIARY_FILE = os.path.join(HERE, "diary.json")
@@ -624,7 +625,7 @@ def main():
     DESK_NOTES[0] = cfg["desk_notes"]
     diary = Diary(DIARY_FILE)
     buddy = Buddy(cfg)
-    log(f"Buddy's eyes: camera {cfg['camera']}, vision {cfg['vision_model']}, chat {cfg['chat_model']}")
+    log(f"Buddy's eyes ({VERSION}): camera {cfg['camera']}, vision {cfg['vision_model']}, chat {cfg['chat_model']}")
     if cfg["desk_notes"]:
         log(f"desk notes: {cfg['desk_notes']}")
     if cfg["save_picture"]:
@@ -648,8 +649,13 @@ def main():
                 got = buddy.pc_saw.get(timeout=1.0)
             except queue.Empty:
                 continue
+            log(f"(Buddy on the PC was asked to look and saw: {got})")
             line = remove_absent(drop_copied(_drop_echo(got)))
-            if line and diary.add(line, 1):
+            if not line:
+                log("(nothing left to write down after the filters)")
+            elif not diary.add(line, 1):
+                log("(the same as the last diary line)")
+            else:
                 log(f"saw (Buddy on the PC was asked to look): {line}")
                 buddy.report(diary)
                 last_line = line  # (no need to double-check it)
