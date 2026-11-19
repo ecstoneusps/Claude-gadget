@@ -343,13 +343,21 @@ def things_in(text):
     return {x for x in INVENTABLE if re.search(r"\b" + re.escape(x) + r"s?\b", t)}
 
 
-def invented(remark, diary_text):
-    """The first thing the remark mentions that the diary never does, or None."""
+def invented(remark, diary_text, about=""):
+    """The first thing the remark mentions that the diary never does, or None.
+    A fact from about_owner counts when the diary shows what it's about:
+    "chocolate milk" is fine once the diary has "red cup", if about_owner
+    says the red cup is for chocolate milk."""
     r, d = remark.lower(), diary_text.lower()
+    seen = things_in(d)
+    clauses = [c for c in re.split(r"[.;\n]", about.lower()) if c.strip()]
     for thing in INVENTABLE:
         pat = r"\b" + re.escape(thing) + r"s?\b"
-        if re.search(pat, r) and not re.search(pat, d):
-            return thing
+        if not re.search(pat, r) or re.search(pat, d):
+            continue
+        if any(re.search(pat, c) and (things_in(c) - {thing}) & seen for c in clauses):
+            continue
+        return thing
     return None
 
 
@@ -498,6 +506,8 @@ def main():
     greeted = False  # already asked about the current visitor
     last_greeting = 0.0
     last_line = ""  # what the previous look saw
+    last_spoke = 0.0
+    news = None  # something new in the diary, worth a remark straight away
     while True:
         time.sleep(cfg["look_every"])
         if not (buddy.enabled and buddy.at_desk and buddy.awake) or in_quiet_hours(cfg):
@@ -528,13 +538,20 @@ def main():
         last_line = line
         if unsure:
             log(f"(not sure yet, {', '.join(sorted(unsure))}: {line})")
-        elif diary.add(line, people):
-            log(f"saw: {line} [{people} people]")
-            buddy.report(diary)
+        else:
+            before = things_in(diary.split()[1])  # what the last 30 minutes already had
+            if diary.add(line, people):
+                log(f"saw: {line} [{people} people]")
+                buddy.report(diary)
+                # Something new (a drink, a snack...) is worth a remark now,
+                # not whenever the timer comes round (at most every 5 min).
+                if things_in(line) - before and time.time() - last_spoke > 300:
+                    news = line
         # Someone else showed up: say something now (one greeting per visitor,
         # and not more than every 10 min if they keep popping in and out).
         reason = None
         visitor = False
+        fresh, news = news, None
         # Two looks in a row, so one miscount doesn't make him ask "who's that?".
         if people >= 2 and last_people >= 2 and not greeted and time.time() - last_greeting > 600:
             greeted = True
@@ -545,7 +562,11 @@ def main():
         else:
             if people < 2 and last_people < 2:
                 greeted = False  # they've gone: greet the next visitor
-            if time.time() >= next_remark:
+            if fresh:
+                visitor = True  # (react to what he saw, not a thought of his own)
+                reason = (f"Just now: {fresh}. React to that out loud, playfully (a fact you know about "
+                          f"{cfg['owner']} may fit here).")
+            elif time.time() >= next_remark:
                 reason = "Nothing urgent: only speak up if something in the diary is worth a remark."
         last_people = people
         if reason and not buddy.muted:
@@ -559,7 +580,7 @@ def main():
                     if r and too_similar(r, diary.remarks):
                         log(f"(skipped a repeat: {r})")
                         r = None
-                    if r and (thing := invented(r, diary.split()[1])):
+                    if r and (thing := invented(r, diary.split()[1], cfg["about_owner"])):
                         log(f"(skipped, made up \"{thing}\": {r})")
                         r = None
                     if not r and not visitor and random.uniform(0, 100) < cfg["thoughts"]:
@@ -573,6 +594,7 @@ def main():
                 log(f"{'thinks' if own else 'says'}: {r}")
                 buddy.say(r)
                 diary.said(r)
+                last_spoke = time.time()
             next_remark = time.time() + cfg["remark_every"] * 60 * random.uniform(0.8, 1.2)
 
 
