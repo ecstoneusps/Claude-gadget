@@ -1,5 +1,6 @@
 #include "hass.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <string.h>
 
@@ -165,7 +166,26 @@ static std::string s_memories;
 static bool s_memoriesNew = false;
 static portMUX_TYPE s_memLock = portMUX_INITIALIZER_UNLOCKED;
 
+// Buddy on the PC: running (online/offline, his last will says offline when
+// he stops) and listening for the same wake word? Then he answers it first.
+static std::atomic<bool> s_pcOnline{false};
+static std::atomic<bool> s_pcSameWakeWord{false};
+
 static void onMessage(const std::string& t, const std::string& data) {
+    if (t == "buddy_pc/status") {
+        const bool on = data == "online";
+        if (on != s_pcOnline.exchange(on)) ESP_LOGI(TAG, "Buddy on the PC is %s", on ? "running" : "off");
+        return;
+    }
+    if (t == "buddy_pc/wake_word") {
+        std::string w;
+        for (char c : data) w += (char)tolower((unsigned char)c);
+        const bool same = w.find("buddy") != std::string::npos;
+        if (same != s_pcSameWakeWord.exchange(same))
+            ESP_LOGI(TAG, "Buddy on the PC listens for \"%s\"%s", data.c_str(),
+                     same ? ": he answers \"Hey Buddy\" while he's running" : "");
+        return;
+    }
     if (t == s_base + "/memories") {
         std::string copy = data;  // (no allocation inside the spinlock)
         taskENTER_CRITICAL(&s_memLock);
@@ -200,6 +220,8 @@ static void onMqttEvent(void*, esp_event_base_t, int32_t id, void* data) {
             esp_mqtt_client_subscribe(s_mqtt, (s_base + "/+/press").c_str(), 0);
             esp_mqtt_client_subscribe(s_mqtt, "homeassistant/status", 0);
             esp_mqtt_client_subscribe(s_mqtt, (s_base + "/memories").c_str(), 1);
+            esp_mqtt_client_subscribe(s_mqtt, "buddy_pc/status", 0);
+            esp_mqtt_client_subscribe(s_mqtt, "buddy_pc/wake_word", 0);
             s_sendAll.store(true);
             break;
         case MQTT_EVENT_DISCONNECTED:
@@ -278,6 +300,8 @@ bool hassStart(const HassConfig& cfg) {
 }
 
 bool hassConnected() { return s_connected.load(); }
+
+bool hassPcAnswers() { return s_connected.load() && s_pcOnline.load() && s_pcSameWakeWord.load(); }
 
 // ---------------------------------------------------------------------------
 // States: sent when they change (numbers: by enough to matter), and all of

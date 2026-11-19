@@ -209,6 +209,13 @@ dog's name?" gets "King!" (the vision model sees them too).
   screen) or on your computer. Lines starting with `#` are ignored.
 - `memory = off` in settings.txt turns notes off altogether.
 
+### Buddy on the PC answers first
+
+While [Buddy on the PC](https://github.com/ecstoneusps/buddy-pc) is running
+and listening for "Hey Buddy" too, he answers it and the desk Buddy stays
+quiet (the PC tells him over MQTT; his log says `wake word: Buddy on the PC
+answers it`). When the PC Buddy stops, the desk Buddy answers again.
+
 ### Shared with Buddy on the PC
 
 With Home Assistant's MQTT set up (see [In Home Assistant](#in-home-assistant-mqtt)),

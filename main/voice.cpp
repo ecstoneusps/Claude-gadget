@@ -21,6 +21,7 @@
 #include "audio_io.h"
 #include "esp_timer.h"
 #include "sound.h"
+#include "hass.h"
 
 static const char* TAG = "voice";
 
@@ -134,6 +135,11 @@ static void detectTask(void*) {
         // ignore it while he's talking (tap the screen to stop him instead).
         if (res->wakeup_state == WAKENET_DETECTED && soundSpeaking()) {
             ESP_LOGI(TAG, "wake word while he's talking; ignored");
+            continue;
+        }
+        // Buddy on the PC answers "Hey Buddy" first while he's running.
+        if (res->wakeup_state == WAKENET_DETECTED && hassPcAnswers()) {
+            ESP_LOGI(TAG, "wake word: Buddy on the PC answers it");
             continue;
         }
         if (res->wakeup_state == WAKENET_DETECTED) {

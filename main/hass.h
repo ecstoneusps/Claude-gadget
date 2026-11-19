@@ -14,6 +14,9 @@ struct HassConfig {
 };
 bool hassStart(const HassConfig& cfg);  // after Wi-Fi has started; false if not set up
 bool hassConnected();
+// Buddy on the PC is running and listens for "Hey Buddy" too: he answers it,
+// and the desk Buddy stays quiet.
+bool hassPcAnswers();
 
 // What he senses and how he is, from the UI task (a few times a second is
 // fine: only changes are sent, plus everything once a minute).
