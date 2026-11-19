@@ -446,6 +446,7 @@ class Buddy:
         self.awake = True
         self.muted = False
         self.pc_online = False  # Buddy on the PC is running: he says the remarks
+        self.desk_online = False
         self.enabled = True  # the switch in Home Assistant, kept across restarts
         try:
             with open(STATE_FILE, encoding="utf-8") as f:
@@ -504,16 +505,26 @@ class Buddy:
                 log("Buddy on the PC is running: he says the remarks" if on else "Buddy on the PC is off: "
                     "the desk Buddy says the remarks")
             self.pc_online = on
+            if on:
+                self.seen.set()  # enough to start: the PC Buddy can say the remarks
             return
         if t == "homeassistant/status" and p == "online" and self.node:
             self.announce()
             return
         parts = t.split("/")
-        if len(parts) == 3 and parts[2] == "status" and p == "online" and not self.node:
-            self.node = parts[1]
-            log(f"found Buddy ({self.node})")
-            self.subscribe_buddy()
-            self.seen.set()
+        if len(parts) == 3 and parts[0] == "buddy" and parts[2] == "status":
+            # His status is kept on the broker even while he's off ("offline"),
+            # so the desk Buddy is found either way.
+            if not self.node:
+                self.node = parts[1]
+                log(f"found Buddy ({self.node}, {'on' if p == 'online' else 'off'})")
+                self.subscribe_buddy()
+                self.seen.set()
+            if parts[1] == self.node:
+                on = p == "online"
+                if on != self.desk_online and self.node:
+                    log("the desk Buddy is on" if on else "the desk Buddy is off: watching without his radar")
+                self.desk_online = on
             return
         if not self.node or not t.startswith(f"buddy/{self.node}/"):
             return
@@ -534,14 +545,28 @@ class Buddy:
                 pass
             log("watching" if self.enabled else "paused (switch in Home Assistant)")
 
+    def watching(self):
+        """Time to look? With the desk Buddy on: when his radar says you're at
+        the desk and he's awake. With only the PC Buddy: always (a picture of
+        an empty desk just isn't written down)."""
+        if self.desk_online:
+            return self.at_desk and self.awake
+        return self.pc_online
+
+    def quiet(self):
+        """Muted ("be quiet" on the desk Buddy)."""
+        return self.desk_online and self.muted
+
     def say(self, text):
         # Buddy on the PC answers first while he's running, so he says them.
         if self.pc_online:
             self.c.publish("buddy_pc/say", text, qos=1)
-        else:
+        elif self.node:
             self.c.publish(self.topic("say/set"), text)
 
     def report(self, diary):
+        if not self.node:  # the desk Buddy was never seen: no sensor to report to
+            return
         last = diary.lines[-1]["what"] if diary.lines else "nothing yet today"
         self.c.publish(self.topic("seeing"), last[:250], retain=True)
         self.c.publish(self.topic("seeing/attributes"), json.dumps({"log": diary.text(last=60)}), retain=True)
@@ -566,7 +591,7 @@ def main():
     if cfg["save_picture"]:
         log(f"saving each picture as {PICTURE_FILE}")
     if not buddy.seen.wait(60):
-        log("haven't heard from Buddy yet (is his MQTT set up and is he on?); still waiting")
+        log("haven't heard from either Buddy yet (is MQTT set up, and is one of them on?); still waiting")
         buddy.seen.wait()
     next_remark = time.time() + cfg["remark_every"] * 60 * random.uniform(0.5, 1.0)
     last_people = 1
@@ -579,7 +604,7 @@ def main():
     while True:
         time.sleep(15 if quick_look else cfg["look_every"])
         quick_look = False
-        if not (buddy.enabled and buddy.at_desk and buddy.awake) or in_quiet_hours(cfg):
+        if not (buddy.enabled and buddy.watching()) or in_quiet_hours(cfg):
             continue
         jpg = snapshot(cfg["camera"])
         if jpg is None:
@@ -639,7 +664,7 @@ def main():
             elif time.time() >= next_remark:
                 reason = "Nothing urgent: only speak up if something in the diary is worth a remark."
         last_people = people
-        if reason and not buddy.muted:
+        if reason and not buddy.quiet():
             # Now and then (and sometimes when there's nothing to remark on),
             # a thought of his own instead of a comment on what he sees.
             own = not visitor and random.uniform(0, 100) < cfg["thoughts"]
