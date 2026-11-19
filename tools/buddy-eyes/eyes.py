@@ -202,6 +202,7 @@ def look(cfg, jpg):
     reply = ollama_chat(cfg, cfg["vision_model"],
                         [{"role": "user", "content": prompt, "images": [base64.b64encode(jpg).decode()]}],
                         json_format=True)
+    LAST_REPLY[0] = reply
     return parse_look(reply)
 
 
@@ -217,6 +218,7 @@ def _drop_echo(text):
 # Things the vision model keeps "seeing" that aren't there (not_there in
 # eyes.ini): taken out of every diary line.
 NOT_THERE = []
+LAST_REPLY = [""]  # the vision model's last answer, for the log
 # The desk notes: a small vision model repeats them back as if it saw them
 # ("Eric's red cup holding chocolate milk"), so anything copied from them goes.
 DESK_NOTES = [""]
@@ -651,9 +653,11 @@ def main():
                 pass
         del jpg
         if not seen:
+            log(f"(looked: nothing to write down; the vision model said {LAST_REPLY[0][:160]!r})")
             continue
         activity, people, notable = seen
         line = activity + (f" ({notable})" if notable else "")
+        log(f"(looked: {line})")
         # The vision model sometimes imagines a mug or a snack in one picture:
         # those only go in the diary once a second look in a row sees them too.
         unsure = kinds_in(line) - kinds_in(last_line)
