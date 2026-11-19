@@ -17,6 +17,7 @@ import configparser
 import datetime as dt
 import json
 import os
+import queue
 import random
 import re
 import sys
@@ -478,6 +479,7 @@ class Buddy:
         self.muted = False
         self.pc_online = False  # Buddy on the PC is running: he says the remarks
         self.desk_online = False
+        self.pc_saw = queue.Queue()  # what the PC Buddy saw when asked to look
         self.enabled = True  # the switch in Home Assistant, kept across restarts
         try:
             with open(STATE_FILE, encoding="utf-8") as f:
@@ -505,6 +507,7 @@ class Buddy:
         client.subscribe("buddy/+/status")
         client.subscribe("homeassistant/status")
         client.subscribe("buddy_pc/status")
+        client.subscribe("buddy_pc/saw")
         if self.node:
             self.subscribe_buddy()
 
@@ -530,6 +533,10 @@ class Buddy:
 
     def on_message(self, client, userdata, msg):
         t, p = msg.topic, msg.payload.decode(errors="replace")
+        if t == "buddy_pc/saw":
+            if p.strip():
+                self.pc_saw.put(p.strip())
+            return
         if t == "buddy_pc/status":
             on = p == "online"
             if on != self.pc_online:
@@ -634,7 +641,18 @@ def main():
     quick_look = False  # something to double-check: look again in 15 s
     news = None  # something new in the diary, worth a remark straight away
     while True:
-        time.sleep(15 if quick_look else cfg["look_every"])
+        # Wait for the next look, writing down what the PC Buddy saw meanwhile.
+        wait_until = time.time() + (15 if quick_look else cfg["look_every"])
+        while time.time() < wait_until:
+            try:
+                got = buddy.pc_saw.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            line = remove_absent(drop_copied(_drop_echo(got)))
+            if line and diary.add(line, 1):
+                log(f"saw (Buddy on the PC was asked to look): {line}")
+                buddy.report(diary)
+                last_line = line  # (no need to double-check it)
         quick_look = False
         if not (buddy.enabled and buddy.watching()) or in_quiet_hours(cfg):
             continue
