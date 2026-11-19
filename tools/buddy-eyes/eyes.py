@@ -69,6 +69,7 @@ def load_config():
         "thoughts": max(0, min(100, c.getint("thoughts_percent", 40))),
         "desk_notes": c.get("desk_notes", "").strip(),
         "about_owner": c.get("about_owner", "").strip(),
+        "not_there": [w.strip().lower() for w in c.get("not_there", "").split(",") if w.strip()],
         "save_picture": c.getboolean("save_last_picture", False),
         "quiet_from": c.get("quiet_hours_from", "23:00").strip(),
         "quiet_to": c.get("quiet_hours_to", "07:00").strip(),
@@ -206,6 +207,31 @@ def _drop_echo(text):
     return " ".join(keep).strip().rstrip(" .,;")
 
 
+# Things the vision model keeps "seeing" that aren't there (not_there in
+# eyes.ini): taken out of every diary line.
+NOT_THERE = []
+
+
+def remove_absent(text, words=None):
+    """'sitting at a desk with a laptop, typing' -> 'sitting at a desk, typing'."""
+    original = text
+    for w in (NOT_THERE if words is None else words):
+        pat = re.escape(w) + r"s?"
+        # "with a laptop", "using his laptop", "on the white laptop"
+        text = re.sub(r"\s*,?\s*\b(?:with|using|on|at|holding|near|beside|and|or|while using)\s+"
+                      r"(?:(?:a|an|the|his|her|their)\s+)?(?:\w+\s+)?" + pat + r"\b", "", text, flags=re.I)
+        # Anything else still mentioning it goes, sentence or bracket at a time.
+        parts = re.split(r"(?<=[.!?,;])\s+|\s*[()]\s*", text)
+        text = " ".join(p for p in parts if p and not re.search(r"\b" + pat + r"\b", p, re.I))
+    text = text.strip().rstrip(" .,;")
+    if text == original.strip().rstrip(" .,;"):
+        return text
+    # Nothing sensible left ("Eric is"): drop it (that look is skipped).
+    if re.search(r"\b(is|are|was|were|be|a|an|the|his|her|their|with|and)$", text, re.I) or len(text.split()) < 2:
+        return ""
+    return text
+
+
 def parse_look(reply):
     try:
         d = json.loads(reply)
@@ -215,8 +241,8 @@ def parse_look(reply):
         people = int(d.get("people", 0))
     except (TypeError, ValueError):
         people = 0
-    activity = _drop_echo(str(d.get("activity", "")))
-    notable = _drop_echo(str(d.get("notable", "")))
+    activity = remove_absent(_drop_echo(str(d.get("activity", ""))))
+    notable = remove_absent(_drop_echo(str(d.get("notable", ""))))
     # Buddy's eyes only looks while the radar says someone is at the desk, so
     # "nobody there" is the camera missing them (out of frame, dark), not news.
     if not activity or re.search(r"\b(nobody|no one|no-one|empty|no person|not visible)\b", activity, re.I):
@@ -511,6 +537,7 @@ def in_quiet_hours(cfg, now=None):
 
 def main():
     cfg = load_config()
+    NOT_THERE[:] = cfg["not_there"]
     diary = Diary(DIARY_FILE)
     buddy = Buddy(cfg)
     log(f"Buddy's eyes: camera {cfg['camera']}, vision {cfg['vision_model']}, chat {cfg['chat_model']}")
