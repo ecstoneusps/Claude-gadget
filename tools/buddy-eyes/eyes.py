@@ -202,7 +202,7 @@ def _drop_echo(text):
     presence sensor (the vision model sometimes copies it back) or talk about
     the picture itself ("the image is blurry") instead of the desk."""
     parts = re.split(r"(?<=[.!?])\s+|\s*[()]\s*", text)
-    keep = [p for p in parts if p and not re.search(r"sensor|confirm|out of frame|poor light|image|picture|photo|webcam|camera|blurr|difficult to|hard to tell|wearing|shirt|hoodie|sweater|jacket|clothing|outfit", p, re.I)]
+    keep = [p for p in parts if p and not re.search(r"sensor|confirm|out of frame|poor light|behind|counter|background|not on (?:his|her|their|the) desk|image|picture|photo|webcam|camera|blurr|difficult to|hard to tell|wearing|shirt|hoodie|sweater|jacket|clothing|outfit", p, re.I)]
     return " ".join(keep).strip().rstrip(" .,;")
 
 
@@ -335,6 +335,26 @@ def clean_remark(reply):
 INVENTABLE = ("coffee", "tea", "drink", "drinking", "mug", "cup", "glass", "bottle", "soda", "beer", "water", "energy drink", "juice",
               "donut", "doughnut", "snack", "chips", "cookie", "pizza", "sandwich", "burger", "candy",
               "chocolate", "milk", "face", "yawn", "phone", "laptop", "cat", "dog", "hat", "glasses")
+
+
+# For "did the next look see it too?", different words for the same kind
+# of thing count as the same: "a red cup", "about to drink", "drinking".
+KINDS = {
+    "drink": ("coffee", "tea", "drink", "drinking", "mug", "cup", "glass", "bottle", "soda", "beer", "water",
+              "energy drink", "juice", "milk"),
+    "food": ("donut", "doughnut", "snack", "chips", "cookie", "pizza", "sandwich", "burger", "candy",
+             "chocolate"),
+}
+
+
+def kinds_in(text):
+    """The kinds of thing (drink, food, phone...) a text mentions."""
+    out = set()
+    for thing in things_in(text):
+        out.add(next((k for k, words in KINDS.items() if thing in words), thing))
+    if "drink" in out:
+        out.discard("food")  # chocolate milk is a drink
+    return out
 
 
 def things_in(text):
@@ -507,9 +527,11 @@ def main():
     last_greeting = 0.0
     last_line = ""  # what the previous look saw
     last_spoke = 0.0
+    quick_look = False  # something to double-check: look again in 15 s
     news = None  # something new in the diary, worth a remark straight away
     while True:
-        time.sleep(cfg["look_every"])
+        time.sleep(15 if quick_look else cfg["look_every"])
+        quick_look = False
         if not (buddy.enabled and buddy.at_desk and buddy.awake) or in_quiet_hours(cfg):
             continue
         jpg = snapshot(cfg["camera"])
@@ -534,18 +556,19 @@ def main():
         line = activity + (f" ({notable})" if notable else "")
         # The vision model sometimes imagines a mug or a snack in one picture:
         # those only go in the diary once a second look in a row sees them too.
-        unsure = things_in(line) - things_in(last_line)
+        unsure = kinds_in(line) - kinds_in(last_line)
         last_line = line
         if unsure:
             log(f"(not sure yet, {', '.join(sorted(unsure))}: {line})")
+            quick_look = True  # check again soon instead of in a minute
         else:
-            before = things_in(diary.split()[1])  # what the last 30 minutes already had
+            before = kinds_in(diary.split()[1])  # what the last 30 minutes already had
             if diary.add(line, people):
                 log(f"saw: {line} [{people} people]")
                 buddy.report(diary)
                 # Something new (a drink, a snack...) is worth a remark now,
                 # not whenever the timer comes round (at most every 5 min).
-                if things_in(line) - before and time.time() - last_spoke > 300:
+                if kinds_in(line) - before and time.time() - last_spoke > 300:
                     news = line
         # Someone else showed up: say something now (one greeting per visitor,
         # and not more than every 10 min if they keep popping in and out).
