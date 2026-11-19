@@ -438,6 +438,7 @@ class Buddy:
         self.at_desk = False
         self.awake = True
         self.muted = False
+        self.pc_online = False  # Buddy on the PC is running: he says the remarks
         self.enabled = True  # the switch in Home Assistant, kept across restarts
         try:
             with open(STATE_FILE, encoding="utf-8") as f:
@@ -464,6 +465,7 @@ class Buddy:
         log("connected to MQTT; looking for Buddy")
         client.subscribe("buddy/+/status")
         client.subscribe("homeassistant/status")
+        client.subscribe("buddy_pc/status")
         if self.node:
             self.subscribe_buddy()
 
@@ -489,6 +491,13 @@ class Buddy:
 
     def on_message(self, client, userdata, msg):
         t, p = msg.topic, msg.payload.decode(errors="replace")
+        if t == "buddy_pc/status":
+            on = p == "online"
+            if on != self.pc_online:
+                log("Buddy on the PC is running: he says the remarks" if on else "Buddy on the PC is off: "
+                    "the desk Buddy says the remarks")
+            self.pc_online = on
+            return
         if t == "homeassistant/status" and p == "online" and self.node:
             self.announce()
             return
@@ -519,7 +528,11 @@ class Buddy:
             log("watching" if self.enabled else "paused (switch in Home Assistant)")
 
     def say(self, text):
-        self.c.publish(self.topic("say/set"), text)
+        # Buddy on the PC answers first while he's running, so he says them.
+        if self.pc_online:
+            self.c.publish("buddy_pc/say", text, qos=1)
+        else:
+            self.c.publish(self.topic("say/set"), text)
 
     def report(self, diary):
         last = diary.lines[-1]["what"] if diary.lines else "nothing yet today"
