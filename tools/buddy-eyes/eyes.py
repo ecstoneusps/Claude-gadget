@@ -162,10 +162,12 @@ def snapshot(index):
         cam.release()
 
 
-def ollama_chat(cfg, model, messages, json_format=False, timeout=120, temperature=None):
+def ollama_chat(cfg, model, messages, json_format=False, timeout=120, temperature=None, steady=False):
     body = {"model": model, "messages": messages, "stream": False, "keep_alive": "10m", "options": {}}
     if temperature is not None:
         body["options"]["temperature"] = temperature
+    if steady:  # the vision model: short, and no getting stuck repeating itself
+        body["options"].update({"repeat_penalty": 1.15, "num_predict": 200})
     if model == cfg["chat_model"]:
         # The same context size as Home Assistant and Buddy on the PC: then all
         # three share one loaded copy of the chat model.
@@ -201,7 +203,7 @@ def look(cfg, jpg):
     )
     reply = ollama_chat(cfg, cfg["vision_model"],
                         [{"role": "user", "content": prompt, "images": [base64.b64encode(jpg).decode()]}],
-                        json_format=True)
+                        json_format=True, temperature=0.2, steady=True)
     LAST_REPLY[0] = reply
     return parse_look(reply)
 
