@@ -28,7 +28,7 @@ import cv2
 import paho.mqtt.client as mqtt
 import requests
 
-VERSION = "2026-11-19c"  # shown at startup, to check an update took
+VERSION = "2026-11-20a"  # shown at startup, to check an update took
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(HERE, "eyes.ini")
 DIARY_FILE = os.path.join(HERE, "diary.json")
@@ -619,12 +619,79 @@ def in_quiet_hours(cfg, now=None):
 
 # ---------------------------------------------------------------------------
 
+def quiet_log_and_one_copy():
+    """Without a console (pythonw: run-eyes-quiet.bat), the log goes to
+    eyes.log. And only one copy at a time (two would make twice the remarks)."""
+    import socket
+    if sys.stdout is None or sys.stderr is None:
+        path = os.path.join(HERE, "eyes.log")
+        try:
+            if os.path.getsize(path) > 5_000_000:
+                os.replace(path, path + ".old")
+        except OSError:
+            pass
+        sys.stdout = sys.stderr = open(path, "a", encoding="utf-8", buffering=1)
+    lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        lock.bind(("127.0.0.1", 47392))
+    except OSError:
+        log("Buddy's eyes is already running (look for its icon in the tray by the clock); not starting another")
+        sys.exit(0)
+    return lock
+
+
+def start_tray(buddy):
+    """An icon by the clock: pause or resume watching, open the log, quit."""
+    try:
+        import pystray
+        from PIL import Image, ImageDraw
+    except Exception:  # noqa: BLE001 (not installed, or no desktop)
+        return None
+    img = Image.new("RGB", (64, 64), (0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.ellipse((6, 18, 58, 46), fill=(40, 220, 255))   # an eye
+    d.ellipse((24, 22, 40, 42), fill=(0, 0, 0))
+    d.ellipse((29, 25, 34, 30), fill=(255, 255, 255))
+
+    def set_watching(on):
+        state = "ON" if on else "OFF"
+        if buddy.node:  # through the Home Assistant switch, so it shows there too
+            buddy.c.publish(buddy.topic("eyes/set"), state)
+        else:
+            buddy.enabled = on
+            log("watching" if on else "paused (from the tray icon)")
+
+    def open_log():
+        path = os.path.join(HERE, "eyes.log")
+        if os.path.exists(path) and hasattr(os, "startfile"):
+            os.startfile(path)
+
+    def quit_eyes():
+        try:
+            buddy.c.publish(AVAIL_TOPIC, "offline", retain=True).wait_for_publish(2)
+        except Exception:  # noqa: BLE001
+            pass
+        icon.stop()
+        os._exit(0)
+
+    icon = pystray.Icon("buddy_eyes", img, "Buddy's eyes", pystray.Menu(
+        pystray.MenuItem("Pause watching", lambda: set_watching(False)),
+        pystray.MenuItem("Resume watching", lambda: set_watching(True)),
+        pystray.MenuItem("Open the log", open_log),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Quit Buddy's eyes", quit_eyes)))
+    threading.Thread(target=icon.run, daemon=True, name="tray").start()
+    return icon
+
+
 def main():
+    _lock = quiet_log_and_one_copy()  # noqa: F841 (held while it runs)
     cfg = load_config()
     NOT_THERE[:] = cfg["not_there"]
     DESK_NOTES[0] = cfg["desk_notes"]
     diary = Diary(DIARY_FILE)
     buddy = Buddy(cfg)
+    start_tray(buddy)
     log(f"Buddy's eyes ({VERSION}): camera {cfg['camera']}, vision {cfg['vision_model']}, chat {cfg['chat_model']}")
     if cfg["desk_notes"]:
         log(f"desk notes: {cfg['desk_notes']}")

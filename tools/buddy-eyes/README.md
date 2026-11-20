@@ -69,3 +69,11 @@ On the **Desk Buddy** device:
 
 If it uses the wrong camera, set `camera_index = 1`. Settings in `eyes.ini`:
 how often to look and to remark, quiet hours, and which models to use.
+
+## Without the console window
+
+**run-eyes-quiet.bat** starts it with no window: the log goes to `eyes.log`,
+and its icon in the tray by the clock (an eye) has **Pause watching**,
+**Resume watching**, **Open the log** and **Quit Buddy's eyes**. Only one copy
+runs at a time. To start it this way when you log in, point the Startup
+shortcut at run-eyes-quiet.bat instead of run-eyes.bat.
