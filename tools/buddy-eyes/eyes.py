@@ -28,7 +28,7 @@ import cv2
 import paho.mqtt.client as mqtt
 import requests
 
-VERSION = "2026-11-20a"  # shown at startup, to check an update took
+VERSION = "2026-11-22a"  # shown at startup, to check an update took
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(HERE, "eyes.ini")
 DIARY_FILE = os.path.join(HERE, "diary.json")
@@ -73,6 +73,7 @@ def load_config():
         "desk_notes": c.get("desk_notes", "").strip(),
         "about_owner": c.get("about_owner", "").strip(),
         "not_there": [w.strip().lower() for w in c.get("not_there", "").split(",") if w.strip()],
+        "never_mention": [w.strip().lower() for w in c.get("never_mention", "").split(",") if w.strip()],
         "save_picture": c.getboolean("save_last_picture", False),
         "quiet_from": c.get("quiet_hours_from", "23:00").strip(),
         "quiet_to": c.get("quiet_hours_to", "07:00").strip(),
@@ -311,7 +312,8 @@ def remark(cfg, diary, reason):
         + (f"Things you know about {cfg['owner']} (only use one when the diary shows something it's about, "
            f"to make the joke land): {cfg['about_owner']}\n\n" if cfg["about_owner"] else "")
         +
-        "Say one short, natural remark out loud to " + cfg["owner"] + " about what you've noticed: funny, "
+        _never_mention_line(cfg)
+        + "Say one short, natural remark out loud to " + cfg["owner"] + " about what you've noticed: funny, "
         "teasing or kind, one or two sentences, like a friend glancing over. Patterns over the day make the "
         "best remarks. Only mention things that are written in the diary: never invent food, drinks, "
         "counts or faces that aren't there. If the diary only shows ordinary sitting, working or looking "
@@ -348,6 +350,21 @@ THOUGHT_SEEDS = (
 CLAIMS_ABOUT_OWNER = re.compile(r"\b(every ?time you|whenever you|you always|you never|you (say|said|keep saying))\b", re.I)
 
 
+def mentions_banned(cfg, text):
+    """The first never_mention (or not_there) word a remark uses, or None:
+    "nap in his coffee mug" when there's never any coffee."""
+    for w in cfg.get("never_mention", []) + cfg.get("not_there", []):
+        if re.search(r"\b" + re.escape(w) + r"s?\b", text, re.I):
+            return w
+    return None
+
+
+def _never_mention_line(cfg):
+    words = cfg.get("never_mention", []) + cfg.get("not_there", [])
+    return (f"Never mention any of these, not even as a joke or in passing: {', '.join(words)}.\n\n"
+            if words else "")
+
+
 def fresh_thought(cfg, diary, tries=3):
     """A thought that isn't like anything he said today and doesn't make
     claims about the owner (new starting point each try), or None."""
@@ -359,6 +376,8 @@ def fresh_thought(cfg, diary, tries=3):
             log(f"(skipped a repeat: {r})")
         elif CLAIMS_ABOUT_OWNER.search(r):
             log(f"(skipped, guessed about you: {r})")
+        elif (w := mentions_banned(cfg, r)):
+            log(f"(skipped, mentions {w}: {r})")
         else:
             return r
     return None
@@ -375,7 +394,7 @@ def thought(cfg, diary):
         f"doing, eating, drinking or saying. You're talking to {cfg['owner']}: call them \"you\", not by "
         "name in the third person. One or two short sentences (under 35 words), spoken out loud, playful "
         f"and a little quirky, like a friend thinking aloud. Don't claim things about what {cfg['owner']} "
-        "always says or does.\n\nStart with one emotion tag in square brackets, like [happy], [thinking], [silly], "
+        "always says or does.\n\n" + _never_mention_line(cfg) + "Start with one emotion tag in square brackets, like [happy], [thinking], [silly], "
         "[surprised] or [sleepy]. No lists, no markdown, no emoji."
     )
     reply = ollama_chat(cfg, cfg["chat_model"], [
@@ -802,6 +821,9 @@ def main():
                         r = None
                     if r and (thing := invented(r, diary.split()[1], cfg["about_owner"])):
                         log(f"(skipped, made up \"{thing}\": {r})")
+                        r = None
+                    if r and (w := mentions_banned(cfg, r)):
+                        log(f"(skipped, mentions {w}: {r})")
                         r = None
                     if not r and not visitor and random.uniform(0, 100) < cfg["thoughts"]:
                         own = True
