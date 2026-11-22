@@ -28,7 +28,7 @@ import cv2
 import paho.mqtt.client as mqtt
 import requests
 
-VERSION = "2026-11-22a"  # shown at startup, to check an update took
+VERSION = "2026-11-22b"  # shown at startup, to check an update took
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(HERE, "eyes.ini")
 DIARY_FILE = os.path.join(HERE, "diary.json")
@@ -638,18 +638,77 @@ def in_quiet_hours(cfg, now=None):
 
 # ---------------------------------------------------------------------------
 
+class DailyLog:
+    """The log file, one day at a time: at midnight (or at start, if it's from
+    an earlier day) NAME.log becomes NAME-yesterday.log, replacing the one
+    before, so there are never more than two days to read through."""
+
+    def __init__(self, path):
+        import threading
+        self.path = path
+        self.old = path[:-4] + "-yesterday.log" if path.endswith(".log") else path + ".yesterday"
+        self._lock = threading.Lock()
+        self.day = self._file_day()
+        self.f = None
+        self._open()
+
+    def _file_day(self):
+        import datetime as _dt
+        try:
+            return _dt.date.fromtimestamp(os.path.getmtime(self.path))
+        except OSError:
+            return None
+
+    def _open(self):
+        import datetime as _dt
+        today = _dt.date.today()
+        if self.day is not None and self.day != today:
+            try:
+                if self.f:
+                    self.f.close()
+                if self.day == today - _dt.timedelta(days=1):
+                    os.replace(self.path, self.old)  # yesterday's: kept
+                else:
+                    os.remove(self.path)  # older than that: gone
+                    if os.path.exists(self.old):
+                        os.remove(self.old)
+            except OSError:
+                pass
+        for leftover in (self.path + ".old",):  # (from the old size-based limit)
+            try:
+                os.remove(leftover)
+            except OSError:
+                pass
+        self.f = open(self.path, "a", encoding="utf-8", buffering=1)
+        if self.day != today:
+            self.f.write(f"--- {today.strftime('%A, %B %d, %Y').replace(' 0', ' ')} ---\n")
+        self.day = today
+
+    def write(self, text):
+        import datetime as _dt
+        with self._lock:
+            if _dt.date.today() != self.day:
+                self._open()
+            return self.f.write(text)
+
+    def flush(self):
+        with self._lock:
+            self.f.flush()
+
+    def isatty(self):
+        return False
+
+    @property
+    def encoding(self):
+        return "utf-8"
+
+
 def quiet_log_and_one_copy():
     """Without a console (pythonw: run-eyes-quiet.bat), the log goes to
     eyes.log. And only one copy at a time (two would make twice the remarks)."""
     import socket
     if sys.stdout is None or sys.stderr is None:
-        path = os.path.join(HERE, "eyes.log")
-        try:
-            if os.path.getsize(path) > 5_000_000:
-                os.replace(path, path + ".old")
-        except OSError:
-            pass
-        sys.stdout = sys.stderr = open(path, "a", encoding="utf-8", buffering=1)
+        sys.stdout = sys.stderr = DailyLog(os.path.join(HERE, "eyes.log"))
     lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         lock.bind(("127.0.0.1", 47392))

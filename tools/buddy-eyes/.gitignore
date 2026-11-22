@@ -4,4 +4,5 @@ state.json
 last_look.jpg
 eyes.log
 eyes.log.old
+eyes-yesterday.log
 __pycache__/
