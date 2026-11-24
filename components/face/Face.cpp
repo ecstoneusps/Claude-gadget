@@ -252,6 +252,17 @@ float Face::rand01() {
 void Face::setExpression(Expression e) {
     expr_ = e;
     target_ = paramsFor(e);
+    // The monitor face rests on a smile "(:" (his character's usual look).
+    if (style_ == FaceStyle::Monitor && e == Expression::Neutral) {
+        target_.mouthCurve = 0.85f;
+        target_.mouthW = 56;
+    }
+}
+
+void Face::setStyle(FaceStyle s) {
+    style_ = s;
+    setExpression(expr_);
+    cur_ = target_;
 }
 
 void Face::setLookAt(float x, float y) {
@@ -540,17 +551,39 @@ void Face::drawMonitor(Canvas& cv) const {
     const float gx = -faceLookY * 14 * s - breath;  // face up = screen right
     const float gy = faceLookX * 18 * s;
 
-    // Eyes: two tall ovals, one above the other. A blink squashes them
-    // sideways (that's "down" for this face); heavy lids narrow them.
+    // Eyes: two round dots, one above the other -- the top one bigger, as on
+    // his character's screen. A blink squashes them sideways (that's "down"
+    // for this face); heavy lids narrow them. "Cool": sunglasses instead.
     const float ex = W * 0.68f + gx;
-    for (int side = -1; side <= 1; side += 2) {
-        const float sc = side < 0 ? p.eyeScaleL : p.eyeScaleR;
-        const float open = clampf(openBoth * (side < 0 ? p.opennessL : p.opennessR), 0, 1)
-                         * (1.0f - 0.45f * clampf(p.lidTop, 0, 1) - 0.35f * clampf(p.lidBottom, 0, 1));
-        const float ay = 0.62f * p.eyeW * s * sc;
-        const float ax = fmaxf(0.36f * p.eyeH * s * sc * open, 4 * s);
-        const float ey = H * 0.5f + side * 50 * s + gy;
-        cv.fillEllipse((int)ex, (int)ey, (int)ax, (int)ay, white);
+    if (expr_ == Expression::Cool) {
+        // White frames with dark glare stripes, the lenses stacked like the eyes.
+        for (int side = -1; side <= 1; side += 2) {
+            const float cy = H * 0.5f + side * 42 * s + gy;
+            const float lw = 66 * s, lh = 70 * s;  // across (x) and along (y) the face
+            const int x0 = (int)(ex - lw / 2), y0 = (int)(cy - lh / 2);
+            cv.fillRoundRect(x0, y0, (int)lw, (int)lh, (int)(20 * s), white);
+            const uint16_t glare = rgb565(30, 34, 32);
+            for (int k = 0; k < 2; ++k) {  // two slanted stripes across each lens
+                const float off = (k == 0 ? -12 : 10) * s;
+                const float w2 = (k == 0 ? 9 : 5) * s;
+                cv.fillTriangle((int)(ex - lw * 0.32f + off), (int)(cy + lh * 0.38f),
+                                (int)(ex - lw * 0.32f + off + w2), (int)(cy + lh * 0.38f),
+                                (int)(ex + lw * 0.30f + off + w2), (int)(cy - lh * 0.38f), glare);
+                cv.fillTriangle((int)(ex - lw * 0.32f + off), (int)(cy + lh * 0.38f),
+                                (int)(ex + lw * 0.30f + off + w2), (int)(cy - lh * 0.38f),
+                                (int)(ex + lw * 0.30f + off), (int)(cy - lh * 0.38f), glare);
+            }
+        }
+        cv.fillRect((int)(ex + 14 * s), (int)(H * 0.5f - 12 * s + gy), (int)(12 * s), (int)(24 * s), white);  // bridge
+    } else {
+        for (int side = -1; side <= 1; side += 2) {
+            const float sc = side < 0 ? p.eyeScaleL : p.eyeScaleR;
+            const float open = clampf(openBoth * (side < 0 ? p.opennessL : p.opennessR), 0, 1)
+                             * (1.0f - 0.45f * clampf(p.lidTop, 0, 1) - 0.35f * clampf(p.lidBottom, 0, 1));
+            const float r = 0.5f * p.eyeW * s * sc * (side < 0 ? 1.0f : 0.68f);  // top big, bottom small
+            const float ey = H * 0.5f + (side < 0 ? -40 : 48) * s + gy;
+            cv.fillEllipse((int)ex, (int)ey, (int)fmaxf(r * open, 4 * s), (int)r, white);
+        }
     }
 
     // Mouth: big, along the left side. Face-space "up" is screen +x, so a

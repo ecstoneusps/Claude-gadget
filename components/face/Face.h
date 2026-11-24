@@ -92,7 +92,7 @@ public:
     void blinkNow();
     void setAutoBlink(bool on) { autoBlink_ = on; }
     void setSeed(uint32_t seed) { rng_ = seed ? seed : 1; }
-    void setStyle(FaceStyle s) { style_ = s; }
+    void setStyle(FaceStyle s);
     FaceStyle style() const { return style_; }
 
 private:
