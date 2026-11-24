@@ -650,6 +650,8 @@ static void handleMessage(const std::string& text) {
     cJSON_Delete(j);
 }
 
+static void sendPhoto(uint8_t* jpeg, size_t len);
+
 static void geminiTask(void*) {
     while (true) {
         std::string* msg = nullptr;
