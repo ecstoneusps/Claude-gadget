@@ -252,8 +252,11 @@ float Face::rand01() {
 void Face::setExpression(Expression e) {
     expr_ = e;
     target_ = paramsFor(e);
-    // The monitor face rests on a smile "(:" (his character's usual look).
-    if (style_ == FaceStyle::Monitor && e == Expression::Neutral) {
+    // The monitor face rests on a smile "(:" (his character's usual look),
+    // and keeps it while listening (the binary turns brighter instead): the
+    // buddy "listens" whenever it hears talking nearby, even a fan.
+    if (style_ == FaceStyle::Monitor && (e == Expression::Neutral || e == Expression::Listening)) {
+        target_.mouthOpen = 0;
         target_.mouthCurve = 0.85f;
         target_.mouthW = 56;
     }
