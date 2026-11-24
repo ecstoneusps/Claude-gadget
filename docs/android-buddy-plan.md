@@ -43,3 +43,15 @@ holder).
 2. "Hey Buddy" wake word; burn-in protection; sleep when nobody's around.
 3. Optional: offline fallback model.
 APK built by GitHub Actions, installed like the TV app (adb or a file).
+
+## Also: Galaxy Z Fold 3 (already owned, a big Buddy for the owner's desk)
+- Snapdragon 888, 12 GB RAM, 7.6" inner + 6.2" cover screen. Room for a
+  ~3B local model (a better offline fallback) at a decent speed.
+- Flex mode: half-folded it stands by itself; face on the top half, status /
+  his last words / photos on the bottom half (Android's folding-feature API
+  tells the app where the hinge is). The cover screen gives a smaller Buddy.
+- Good test bed: build and try the app here first, then move it to a cheap
+  phone (A16 class) for gifts.
+- Cautions: foldable inner screens burn in faster (burn-in protection matters
+  more); "Protect battery" on the charger; standing half-folded for months
+  may wear the hinge (a stand holding it open is the safe option).
