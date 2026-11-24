@@ -303,6 +303,16 @@ bool isClarifyRequest(const std::string& reply) {
     return false;
 }
 
+bool looksForeign(const std::string& heard) {
+    if (heard.find("\xC2\xBF") != std::string::npos || heard.find("\xC2\xA1") != std::string::npos) return true;
+    int accented = 0;  // UTF-8 letters from Latin-1 (é, ñ, ü...) and beyond
+    for (size_t i = 0; i < heard.size(); ++i) {
+        const unsigned char c = (unsigned char)heard[i];
+        if (c >= 0xC3 && c < 0xF8) ++accented;  // a multi-byte letter starts here
+    }
+    return accented >= 2;
+}
+
 std::string emotionFromSpeech(const std::string& speech) {
     const std::string r = " " + normalizeSpeech(speech) + " ";
     auto any = [&](std::initializer_list<const char*> ps) {

@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <deque>
+#include <vector>
 #include <string.h>
 
 #include "cJSON.h"
@@ -56,7 +57,7 @@ static std::atomic<bool> s_sayPending{false};
 static std::atomic<const char*> s_status{"off"};
 // If Gemini turns the session down as it starts, the next try asks for less:
 // 0 everything, 1 without Google Search, 2 without any tools.
-static std::atomic<int> s_setupLevel{0};
+static std::atomic<int> s_setupLevel{1};  // Google Search isn't in the free tier ("exceeded your quota")
 static std::atomic<bool> s_setupDone{false};
 static std::string s_sayText;
 
@@ -67,6 +68,13 @@ static bool s_connecting = false, s_sessionReady = false, s_closeAfterTurn = fal
 static bool s_discard = false;      // a turn with nothing said: ignore its answer
 static bool s_fromVoice = false;    // the turn came from the microphones (they wait for it)
 static bool s_spoke = false;        // some of this answer was played
+// A follow-up (no "Hey Buddy") may be a TV or someone else talking: its
+// answer is held back until Gemini says what it heard, and dropped if that's
+// nothing or not English.
+static bool s_gate = false, s_drop = false;
+static std::vector<int16_t> s_held;
+static std::atomic<int> s_followUps{0};  // in a row, since "Hey Buddy"
+static constexpr int kMaxFollowUps = 3;
 static std::string s_heard, s_said, s_emotion;
 static uint32_t s_deadline = 0, s_lastUse = 0;
 static std::deque<std::pair<std::string, std::string>> s_history;  // (what you said, what he said)
@@ -191,7 +199,9 @@ static std::string systemPrompt() {
              : "About you: " + s_cfg.personality + " ";
     if (!s_cfg.ownerName.empty()) p += "The person you live with is " + s_cfg.ownerName + ". ";
     p += "If you're asked to remember something, call the remember tool; to forget something, call forget. "
-         "Use Google Search for anything current (news, scores, weather, times). ";
+         "Always speak English, even if you hear another language. If what you hear isn't clearly someone "
+         "talking to you (a TV, a video, people talking to each other, noise), say nothing at all. ";
+    if (s_setupLevel.load() == 0) p += "Use Google Search for anything current (news, scores, weather). ";
     if (s_cfg.memory) {
         const std::string notes = memoryPromptBlock();
         if (!notes.empty()) p += "\n" + notes;
@@ -329,6 +339,9 @@ static void startTurn() {
     s_turnPending.store(false);
     s_fromVoice = true;
     s_spoke = false;
+    s_gate = s_followUpTurn.load();
+    s_drop = false;
+    s_held.clear();
     s_heard.clear();
     s_said.clear();
     s_emotion.clear();
@@ -341,6 +354,8 @@ static void startSay() {
     s_sayPending.store(false);
     s_fromVoice = false;
     s_spoke = false;
+    s_gate = s_drop = false;
+    s_held.clear();
     s_heard.clear();
     s_said.clear();
     s_emotion.clear();
@@ -390,6 +405,30 @@ static void pumpAudio() {
     s_deadline = nowMs() + kReplyMs;
 }
 
+static void playPcm(const int16_t* pcm, size_t n) {
+    if (!s_spoke) {
+        s_spoke = true;
+        soundSpeechBegin();
+        s_emotion = emotionFromSpeech(s_said);
+        post(AssistEvent::Reply, "", s_emotion.c_str());
+    }
+    if (!s_cancelled.load()) soundSpeechWrite(pcm, n);
+}
+
+// A follow-up's answer, held until we know what was heard: let it out, or drop it.
+static void openGate(bool play) {
+    if (!s_gate) return;
+    s_gate = false;
+    if (play && !s_held.empty()) playPcm(s_held.data(), s_held.size());
+    if (!play) {
+        s_drop = true;
+        ESP_LOGI(TAG, "follow-up: heard \"%s\": not for him (nothing clear, or not English); not answering",
+                 s_heard.c_str());
+    }
+    s_held.clear();
+    s_held.shrink_to_fit();
+}
+
 // Gemini's voice: 24 kHz PCM in base64 -> 16 kHz, shaped for the small speaker.
 static void playAudio(const char* b64) {
     static SpeechShaper shaper(kMicRate);
@@ -407,19 +446,23 @@ static void playAudio(const char* b64) {
     if (out) {
         const size_t n = s_resampler.process((const int16_t*)raw, in, out, cap);
         shaper.process(out, n);
-        if (!s_spoke) {
-            s_spoke = true;
-            soundSpeechBegin();
-            s_emotion = emotionFromSpeech(s_said);
-            post(AssistEvent::Reply, "", s_emotion.c_str());
-        }
-        if (!s_cancelled.load()) soundSpeechWrite(out, n);
+        if (s_gate) s_held.insert(s_held.end(), out, out + n);  // wait: is it really for him?
+        else if (!s_drop) playPcm(out, n);
         heap_caps_free(out);
     }
     heap_caps_free(raw);
 }
 
 static void finishReply() {
+    if (s_gate) openGate(s_heard.find_first_not_of(" .") != std::string::npos && !looksForeign(s_heard));
+    if (s_drop) {  // a follow-up that wasn't for him: the conversation ends quietly
+        s_drop = false;
+        s_cancelled.store(false);
+        endTurn();
+        post(AssistEvent::NotHeard);
+        voiceResume();
+        return;
+    }
     const bool cancelled = s_cancelled.exchange(false);
     if (s_spoke) {
         soundSpeechEnd();
@@ -439,9 +482,14 @@ static void finishReply() {
     endTurn();
     if (s_closeAfterTurn) closeSession();
     if (!fromVoice) return;
-    bool again = spoke && s_cfg.followUp && !cancelled && !isClarifyRequest(said);
-    if (again && geminiBeginTurn(true)) voiceFollowUp();
-    else voiceResume();
+    bool again = spoke && s_cfg.followUp && !cancelled && !isClarifyRequest(said) && s_followUps.load() < kMaxFollowUps;
+    if (again && geminiBeginTurn(true)) {
+        s_followUps.fetch_add(1);
+        voiceFollowUp();
+    } else {
+        if (spoke && s_followUps.load() >= kMaxFollowUps) ESP_LOGI(TAG, "a few follow-ups in a row; say \"Hey Buddy\" to carry on");
+        voiceResume();
+    }
 }
 
 static void handleToolCall(const cJSON* call) {
@@ -499,7 +547,11 @@ static void handleMessage(const std::string& text) {
         // What you said can come back while you're still talking.
         if (!s_discard && s_stage != Stage::Idle)
             if (const cJSON* t = cJSON_GetObjectItem(cJSON_GetObjectItem(sc, "inputTranscription"), "text"))
-                if (cJSON_IsString(t)) s_heard += t->valuestring;
+                if (cJSON_IsString(t)) {
+                    s_heard += t->valuestring;
+                    // Enough of it to tell whether a follow-up was meant for him.
+                    if (s_gate && s_heard.size() >= 6) openGate(!looksForeign(s_heard));
+                }
         if (s_discard || s_stage != Stage::WaitReply) {
             if (done) s_discard = false;
         } else {
@@ -616,6 +668,7 @@ const char* geminiStatus() {
 
 bool geminiBeginTurn(bool followUp) {
     if (!followUp) s_cancelled.store(false);  // a fresh "Hey Buddy"
+    if (!followUp) s_followUps.store(0);
     if (!s_started.load() || s_keyRejected.load() || !wifiConnected()) return false;
     bool expected = false;
     if (!s_turnActive.compare_exchange_strong(expected, true)) return false;

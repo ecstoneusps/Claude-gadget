@@ -415,6 +415,14 @@ static void test_stream_resampler() {
     for (size_t i = 2; i < out.size(); ++i) CHECK(std::abs((out[i] - out[i - 1]) - 15) <= 1);
 }
 
+static void test_looks_foreign() {
+    CHECK(looksForeign("¿Qué es el número de serie?"));
+    CHECK(looksForeign("Está bien, mañana"));
+    CHECK(looksForeign("I had a crème brûlée"));  // (French counts too)
+    CHECK(!looksForeign("Tell me a joke."));
+    CHECK(!looksForeign("What's the café called?"));  // one accent is fine
+}
+
 static void test_emotion_from_speech() {
     CHECK(emotionFromSpeech("Haha, that's a good one!") == "laughing");
     CHECK(emotionFromSpeech("Oh no, I'm sorry to hear that.") == "sad");
@@ -426,6 +434,7 @@ static void test_emotion_from_speech() {
 
 int main() {
     test_emotion_from_speech();
+    test_looks_foreign();
     test_stream_resampler();
     test_split_leading_tag();
     test_split_no_tag();

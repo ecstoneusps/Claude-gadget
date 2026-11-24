@@ -67,6 +67,10 @@ bool isClarifyRequest(const std::string& reply);
 // itself, so there's no "[happy]" to read): a guess from the words, as an
 // emotion name ("laughing", "sad", ...; "happy" when nothing stands out).
 std::string emotionFromSpeech(const std::string& speech);
+
+// Heard words that aren't English (Spanish from a TV: "¿Qué es...?"):
+// inverted ¿ ¡, or two or more accented letters.
+bool looksForeign(const std::string& heard);
 struct SpeakerIntro {
     enum Kind { None, Owner, Guest } kind = None;
     std::string name;  // Guest: their name ("Sarah"); may be empty
