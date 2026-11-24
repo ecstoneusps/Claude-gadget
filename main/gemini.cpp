@@ -69,8 +69,8 @@ static bool s_discard = false;      // a turn with nothing said: ignore its answ
 static bool s_fromVoice = false;    // the turn came from the microphones (they wait for it)
 static bool s_spoke = false;        // some of this answer was played
 // A follow-up (no "Hey Buddy") may be a TV or someone else talking: its
-// answer is held back until Gemini says what it heard, and dropped if that's
-// nothing or not English.
+// answer is held back until its first few words are in, and dropped if he's
+// answering in another language (Gemini heard noise or a TV, not you).
 static bool s_gate = false, s_drop = false;
 static std::vector<int16_t> s_held;
 static std::atomic<int> s_followUps{0};  // in a row, since "Hey Buddy"
@@ -422,8 +422,8 @@ static void openGate(bool play) {
     if (play && !s_held.empty()) playPcm(s_held.data(), s_held.size());
     if (!play) {
         s_drop = true;
-        ESP_LOGI(TAG, "follow-up: heard \"%s\": nothing clear in English, so not for him; not answering",
-                 s_heard.c_str());
+        ESP_LOGI(TAG, "follow-up: his answer would be \"%s\": not English, so it wasn't you; not answering",
+                 s_said.c_str());
     }
     s_held.clear();
     s_held.shrink_to_fit();
@@ -454,7 +454,7 @@ static void playAudio(const char* b64) {
 }
 
 static void finishReply() {
-    if (s_gate) openGate(englishWords(s_heard) >= 2 && !looksForeign(s_said));
+    if (s_gate) openGate(!s_held.empty() && !looksForeign(s_said));
     if (s_drop) {  // a follow-up that wasn't for him: the conversation ends quietly
         s_drop = false;
         s_cancelled.store(false);
@@ -549,8 +549,9 @@ static void handleMessage(const std::string& text) {
             if (const cJSON* t = cJSON_GetObjectItem(cJSON_GetObjectItem(sc, "inputTranscription"), "text"))
                 if (cJSON_IsString(t)) {
                     s_heard += t->valuestring;
-                    // Real English words (not a phantom Spanish sentence): it's you.
-                    if (s_gate && englishWords(s_heard) >= 2) openGate(true);
+                    // (Not used to decide anything: Gemini's transcript of what you
+                    // said is often empty, or a phantom "¿Qué es el número de serie?",
+                    // even when it understood you perfectly.)
                 }
         if (s_discard || s_stage != Stage::WaitReply) {
             if (done) s_discard = false;
@@ -559,7 +560,9 @@ static void handleMessage(const std::string& text) {
             if (const cJSON* t = cJSON_GetObjectItem(cJSON_GetObjectItem(sc, "outputTranscription"), "text")) {
                 if (cJSON_IsString(t)) {
                     s_said += t->valuestring;
-                    if (s_gate && looksForeign(s_said)) openGate(false);  // answering in Spanish: not for him
+                    // A follow-up's answer, once a few words of it are in: in English it
+                    // was you; answering in another language means it heard a TV or noise.
+                    if (s_gate && s_said.size() >= 15) openGate(!looksForeign(s_said));
                     // The face follows his words once there are a few of them.
                     const std::string e = emotionFromSpeech(s_said);
                     if (s_spoke && s_said.size() > 12 && e != s_emotion) {
