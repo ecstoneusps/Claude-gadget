@@ -403,6 +403,7 @@ static void voiceInitTask(void*) {
         ac.buddyName = config.buddyName;
         ac.ownerName = config.ownerName;
         ac.personality = config.personality;
+        ac.timezone = config.timezone;
         aiStarted.store(assistantStart(ac, assistEvents));
     }
     vTaskDelete(nullptr);

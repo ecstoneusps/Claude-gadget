@@ -83,6 +83,8 @@ struct BuddyConfig {
     std::string buddyName = "Buddy";
     std::string ownerName;           // who he lives with ("" = he doesn't say a name)
     std::string personality;         // extra words about how he is ("" = the built-in personality)
+    // His clock (from the internet), for "what time is it?": a POSIX TZ string.
+    std::string timezone = "EST5EDT,M3.2.0,M11.1.0";
 
     // "What do you see?": photos go straight to a vision model in Ollama
     std::string visionUrl;           // http://192.168.4.98:11434 ("" = no vision)

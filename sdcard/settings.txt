@@ -84,6 +84,7 @@ gemini_voice                 = Puck   # his voice: Puck, Charon, Kore, Fenrir, A
 buddy_name                   = Buddy  # his name
 owner_name                   =        # your first name, so he knows who he lives with
 personality                  =        # optional: more about how he is, in "quotes" (e.g. "a sarcastic robot who loves Roblox")
+timezone                     = eastern # his clock: eastern, central, mountain, arizona, pacific, alaska or hawaii
 
 # --- Home Assistant sensors and controls (MQTT, through the Mosquitto add-on) ---
 # Buddy shows up in Home Assistant as the device "Desk Buddy": at desk, light level,

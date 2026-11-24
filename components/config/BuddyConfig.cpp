@@ -176,6 +176,27 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
         } else if (key == "owner_name") {
             if (val.size() > 32) bad("can be at most 32 characters");
             else cfg.ownerName = val;
+        } else if (key == "timezone") {
+            static const std::pair<const char*, const char*> kZones[] = {
+                {"eastern", "EST5EDT,M3.2.0,M11.1.0"}, {"central", "CST6CDT,M3.2.0,M11.1.0"},
+                {"mountain", "MST7MDT,M3.2.0,M11.1.0"}, {"arizona", "MST7"},
+                {"pacific", "PST8PDT,M3.2.0,M11.1.0"}, {"alaska", "AKST9AKDT,M3.2.0,M11.1.0"},
+                {"hawaii", "HST10"}, {"utc", "UTC0"},
+            };
+            const std::string v = lower(val);
+            bool found = false;
+            for (const auto& z : kZones)
+                if (v == z.first) {
+                    cfg.timezone = z.second;
+                    found = true;
+                }
+            if (!found) {
+                // Or a POSIX time zone ("GMT0BST,M3.5.0/1,M10.5.0"): letters then an offset.
+                bool digit = false;
+                for (char c : val) digit = digit || (c >= '0' && c <= '9');
+                if (val.size() >= 4 && digit && val.find(' ') == std::string::npos) cfg.timezone = val;
+                else bad("must be eastern, central, mountain, arizona, pacific, alaska, hawaii, utc, or a POSIX TZ");
+            }
         } else if (key == "personality") {
             if (val.size() > 600) bad("can be at most 600 characters");
             else cfg.personality = val;
@@ -366,6 +387,7 @@ void addAiSection(std::string& t) {
     str("buddy_name", d.buddyName, "his name");
     str("owner_name", d.ownerName, "your first name, so he knows who he lives with");
     str("personality", d.personality, "optional: more about how he is, in \"quotes\" (e.g. \"a sarcastic robot who loves Roblox\")");
+    str("timezone", "eastern", "his clock: eastern, central, mountain, arizona, pacific, alaska or hawaii");
     add("");
     add("# --- Home Assistant sensors and controls (MQTT, through the Mosquitto add-on) ---");
     add("# Buddy shows up in Home Assistant as the device \"Desk Buddy\": at desk, light level,");

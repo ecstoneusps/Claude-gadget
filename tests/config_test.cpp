@@ -273,6 +273,14 @@ static void test_gemini_brain_and_monitor_face() {
     CHECK(cfg.geminiVoice == "Kore" && cfg.buddyName == "Badware" && cfg.ownerName == "Sam");
     CHECK(cfg.personality == "a dry, funny robot # who loves games");
     CHECK(cfg.aiConfigured());  // no Home Assistant needed
+    CHECK(cfg.timezone == "EST5EDT,M3.2.0,M11.1.0");
+    parseConfig("timezone = Pacific\n", cfg, w);
+    CHECK(cfg.timezone == "PST8PDT,M3.2.0,M11.1.0" && w.empty());
+    parseConfig("timezone = GMT0BST,M3.5.0/1,M10.5.0\n", cfg, w);
+    CHECK(cfg.timezone == "GMT0BST,M3.5.0/1,M10.5.0" && w.empty());
+    parseConfig("timezone = mars\n", cfg, w);
+    CHECK(w.size() == 1);
+    w.clear();
     parseConfig("brain = robot\nface_style = round\ngemini_key = has space\n", cfg, w);
     CHECK(w.size() == 3 && cfg.geminiBrain && cfg.monitorFace);
     BuddyConfig ha;

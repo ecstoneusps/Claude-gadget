@@ -9,6 +9,8 @@
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_netif_sntp.h"
+#include <time.h>
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "freertos/idf_additions.h"
@@ -209,9 +211,10 @@ static std::string systemPrompt() {
          "something looks, call look, then answer from the photo. You can wear sunglasses: when asked to put on "
          "(or take off) your shades or sunglasses, call sunglasses. ";
     p += "If you're asked to remember something, call the remember tool; to forget something, call forget. "
-         "Always speak English, even if you hear another language. A TV, a video, a game, music or narration "
-         "often plays near you: if what you hear is that, or people talking to each other, or noise, rather "
-         "than someone talking to you, reply with only the single word: skip. ";
+         "Always speak English, even if you hear another language. Each time, a note in brackets says whether "
+         "they just said \"Hey Buddy\" (then they're talking to you: always answer) or it's a follow-up. In a "
+         "follow-up, a TV, a video, a game, music or narration may be what you hear: if it is, or people talking "
+         "to each other, or noise, rather than someone talking to you, reply with only the single word: skip. ";
     if (s_setupLevel.load() == 0) p += "Use Google Search for anything current (news, scores, weather). ";
     if (s_cfg.memory) {
         const std::string notes = memoryPromptBlock();
@@ -368,6 +371,22 @@ static void startTurn() {
     s_emotion.clear();
     s_resampler.reset();
     s_stage = Stage::Streaming;
+    // A note first: was it "Hey Buddy" (always answer) or a follow-up (may be
+    // a video), and the time (he has no clock of his own otherwise).
+    std::string note = s_followUpTurn.load()
+                           ? "(A follow-up: they didn't say your name, so this may be a video, a TV or people nearby; if "
+                             "it isn't someone talking to you, reply only: skip.)"
+                           : "(They just said \\\"Hey Buddy\\\": they're talking to you. Answer them; don't skip.)";
+    const time_t now = time(nullptr);
+    if (now > 1700000000) {
+        struct tm lt;
+        localtime_r(&now, &lt);
+        char when[64];
+        strftime(when, sizeof when, " (It's %I:%M %p on %A, %B %d, %Y.)", &lt);
+        note += when;
+    }
+    sendText("{\"clientContent\":{\"turns\":[{\"role\":\"user\",\"parts\":[{\"text\":\"" + note +
+             "\"}]}],\"turnComplete\":false}}");
     sendText("{\"realtimeInput\":{\"activityStart\":{}}}");
 }
 
@@ -504,6 +523,19 @@ static void finishReply() {
         ESP_LOGI(TAG, "it used a tool and said nothing; asking it to say what it did");
         sendText("{\"clientContent\":{\"turns\":[{\"role\":\"user\",\"parts\":[{\"text\":\"(Say briefly, out loud, "
                  "what you just did.)\"}]}],\"turnComplete\":true}}");
+        s_deadline = nowMs() + kReplyMs;
+        return;
+    }
+    // "skip" right after "Hey Buddy" (a video in the background confused it):
+    // it was you, so ask it once to answer.
+    if (s_gate && !s_followUpTurn.load() && saidSkip() && !s_nudged && !s_cancelled.load()) {
+        s_nudged = true;
+        ESP_LOGI(TAG, "it said skip right after \"Hey Buddy\"; telling it to answer");
+        s_said.clear();
+        s_held.clear();
+        s_resampler.reset();
+        sendText("{\"clientContent\":{\"turns\":[{\"role\":\"user\",\"parts\":[{\"text\":\"(That was them "
+                 "talking to you, after \\\"Hey Buddy\\\". Answer what they asked.)\"}]}],\"turnComplete\":true}}");
         s_deadline = nowMs() + kReplyMs;
         return;
     }
@@ -773,6 +805,11 @@ bool geminiStart(const AssistantConfig& cfg, QueueHandle_t events) {
         ESP_LOGE(TAG, "out of memory starting Gemini");
         return false;
     }
+    // His clock, from the internet (for "what time is it?").
+    setenv("TZ", cfg.timezone.empty() ? "UTC0" : cfg.timezone.c_str(), 1);
+    tzset();
+    esp_sntp_config_t sntp = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    if (esp_netif_sntp_init(&sntp) != ESP_OK) ESP_LOGW(TAG, "couldn't start the clock (SNTP)");
     s_status.store("idle");
     s_started.store(true);
     ESP_LOGI(TAG, "brain: Gemini (%s), name %s", cfg.geminiModel.c_str(), cfg.buddyName.c_str());

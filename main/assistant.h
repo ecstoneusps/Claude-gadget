@@ -38,6 +38,7 @@ struct AssistantConfig {
     std::string buddyName;
     std::string ownerName;
     std::string personality;
+    std::string timezone;     // POSIX TZ, for his clock
 };
 
 // What the UI should show, posted to the queue given to assistantStart().
