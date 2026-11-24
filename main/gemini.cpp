@@ -72,6 +72,7 @@ static bool s_spoke = false;        // some of this answer was played
 // answer is held back until its first few words are in, and dropped if he's
 // answering in another language (Gemini heard noise or a TV, not you).
 static bool s_gate = false, s_drop = false;
+static bool s_usedTool = false, s_nudged = false;  // it remembered something, then said nothing: ask it to say so
 static std::vector<int16_t> s_held;
 static std::atomic<int> s_followUps{0};  // in a row, since "Hey Buddy"
 static constexpr int kMaxFollowUps = 3;
@@ -341,6 +342,7 @@ static void startTurn() {
     s_spoke = false;
     s_gate = s_followUpTurn.load();
     s_drop = false;
+    s_usedTool = s_nudged = false;
     s_held.clear();
     s_heard.clear();
     s_said.clear();
@@ -355,6 +357,7 @@ static void startSay() {
     s_fromVoice = false;
     s_spoke = false;
     s_gate = s_drop = false;
+    s_usedTool = s_nudged = false;
     s_held.clear();
     s_heard.clear();
     s_said.clear();
@@ -422,8 +425,11 @@ static void openGate(bool play) {
     if (play && !s_held.empty()) playPcm(s_held.data(), s_held.size());
     if (!play) {
         s_drop = true;
-        ESP_LOGI(TAG, "follow-up: his answer would be \"%s\": not English, so it wasn't you; not answering",
-                 s_said.c_str());
+        if (s_said.empty())
+            ESP_LOGI(TAG, "follow-up: no answer came; going back to waiting for \"Hey Buddy\"");
+        else
+            ESP_LOGI(TAG, "follow-up: his answer would be \"%s\": not English, so it wasn't you; not answering",
+                     s_said.c_str());
     }
     s_held.clear();
     s_held.shrink_to_fit();
@@ -454,7 +460,18 @@ static void playAudio(const char* b64) {
 }
 
 static void finishReply() {
-    if (s_gate) openGate(!s_held.empty() && !looksForeign(s_said));
+    // After a tool (remember, forget) Gemini's voice models sometimes say
+    // nothing: ask it, once, to say what it did.
+    if (s_usedTool && !s_nudged && !s_spoke && s_held.empty() && !s_cancelled.load()) {
+        s_nudged = true;
+        ESP_LOGI(TAG, "it used a tool and said nothing; asking it to say what it did");
+        sendText("{\"clientContent\":{\"turns\":[{\"role\":\"user\",\"parts\":[{\"text\":\"(Say briefly, out loud, "
+                 "what you just did.)\"}]}],\"turnComplete\":true}}");
+        s_deadline = nowMs() + kReplyMs;
+        return;
+    }
+    if (s_gate && s_usedTool && s_held.empty()) openGate(false);
+    else if (s_gate) openGate(!s_held.empty() && !looksForeign(s_said));
     if (s_drop) {  // a follow-up that wasn't for him: the conversation ends quietly
         s_drop = false;
         s_cancelled.store(false);
@@ -524,6 +541,7 @@ static void handleToolCall(const cJSON* call) {
         cJSON_AddItemToArray(fr, r);
     }
     sendJson(resp);
+    s_usedTool = true;
     s_deadline = nowMs() + kReplyMs;
 }
 
