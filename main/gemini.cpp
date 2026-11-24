@@ -54,6 +54,10 @@ static std::atomic<bool> s_heardSpeech{false};
 static std::atomic<bool> s_cancelled{false};
 static std::atomic<bool> s_sayPending{false};
 static std::atomic<const char*> s_status{"off"};
+// If Gemini turns the session down as it starts, the next try asks for less:
+// 0 everything, 1 without Google Search, 2 without any tools.
+static std::atomic<int> s_setupLevel{0};
+static std::atomic<bool> s_setupDone{false};
 static std::string s_sayText;
 
 // Gemini task only.
@@ -139,6 +143,20 @@ static void onWsEvent(void*, esp_event_base_t, int32_t id, void* data) {
             break;
         }
         case WEBSOCKET_EVENT_DATA:
+            if (d->op_code == 0x8) {  // close: a 2-byte code, then why
+                std::string why;
+                if (d->data_ptr && d->data_len > 2) why.assign(d->data_ptr + 2, d->data_len - 2);
+                const int code = (d->data_ptr && d->data_len >= 2)
+                                     ? (((uint8_t)d->data_ptr[0] << 8) | (uint8_t)d->data_ptr[1]) : 0;
+                ESP_LOGW(TAG, "Gemini is closing the session (code %d): %s", code, why.c_str());
+                std::string low = why;
+                for (auto& c : low) c = (char)tolower((unsigned char)c);
+                if (low.find("api key") != std::string::npos || low.find("unauthenticated") != std::string::npos) {
+                    s_keyRejected.store(true);
+                    s_status.store("Gemini key rejected");
+                }
+                break;
+            }
             // Text or binary frames, both JSON (and their continuations).
             if (d->op_code != 0x1 && d->op_code != 0x2 && d->op_code != 0x0) break;
             if (d->payload_offset == 0) s_rx.clear();
@@ -220,10 +238,20 @@ static void sendSetup() {
     cJSON_AddBoolToObject(cJSON_AddObjectToObject(rt, "automaticActivityDetection"), "disabled", true);
     cJSON_AddObjectToObject(setup, "inputAudioTranscription");
     cJSON_AddObjectToObject(setup, "outputAudioTranscription");
+    const int level = s_setupLevel.load();
+    if (level >= 2) {
+        ESP_LOGW(TAG, "starting the session without tools (no remembering or searching)");
+        if (!sendJson(root)) ESP_LOGW(TAG, "couldn't send the session setup");
+        return;
+    }
     cJSON* tools = cJSON_AddArrayToObject(setup, "tools");
-    cJSON* search = cJSON_CreateObject();
-    cJSON_AddObjectToObject(search, "googleSearch");
-    cJSON_AddItemToArray(tools, search);
+    if (level == 0) {
+        cJSON* search = cJSON_CreateObject();
+        cJSON_AddObjectToObject(search, "googleSearch");
+        cJSON_AddItemToArray(tools, search);
+    } else {
+        ESP_LOGW(TAG, "starting the session without Google Search");
+    }
     cJSON* fns = cJSON_CreateObject();
     cJSON* decls = cJSON_AddArrayToObject(fns, "functionDeclarations");
     cJSON_AddItemToArray(decls, fnDecl("remember", "Write down a lasting fact about your owner or their life, to "
@@ -248,6 +276,7 @@ static void closeSession() {
 
 static void connect() {
     if (s_ws || s_keyRejected.load()) return;
+    s_setupDone.store(false);
     static std::string headers;
     headers = "x-goog-api-key: " + s_cfg.geminiKey + "\r\n";
     esp_websocket_client_config_t wc = {};
@@ -457,6 +486,7 @@ static void handleMessage(const std::string& text) {
         return;
     }
     if (cJSON_GetObjectItem(j, "setupComplete")) {
+        s_setupDone.store(true);
         s_connecting = false;
         s_sessionReady = true;
         s_status.store("ready");
@@ -507,7 +537,16 @@ static void geminiTask(void*) {
                 sendSetup();
             } else if (msg == nullptr) {  // disconnected
                 const bool busy = s_stage != Stage::Idle || s_turnPending.load() || s_sayPending.load();
+                const bool duringSetup = s_connecting && !s_setupDone.load();
                 closeSession();
+                // Turned down while starting (not a bad key): try again asking for less,
+                // keeping your question (the microphones' audio is still buffered).
+                if (duringSetup && !s_keyRejected.load() && s_setupLevel.load() < 2 && busy && s_stage == Stage::Idle) {
+                    s_setupLevel.fetch_add(1);
+                    ESP_LOGW(TAG, "Gemini turned the session down; trying a simpler one");
+                    connect();
+                    continue;
+                }
                 if (!s_keyRejected.load()) s_status.store("idle");
                 if (busy) {
                     s_turnPending.store(false);
