@@ -313,6 +313,35 @@ bool looksForeign(const std::string& heard) {
     return accented >= 2;
 }
 
+int englishWords(const std::string& heard) {
+    int words = 0;
+    size_t start = 0;
+    while (start < heard.size()) {
+        size_t end = heard.find_first_of(".?!", start);
+        // "¿...?" : the question mark ends it; a sentence starting with ¿ ends at its ?
+        end = end == std::string::npos ? heard.size() : end + 1;
+        const std::string sentence = heard.substr(start, end - start);
+        start = end;
+        if (looksForeign(sentence)) continue;
+        bool inWord = false, plain = true;
+        int letters = 0;
+        for (size_t i = 0; i <= sentence.size(); ++i) {
+            const unsigned char c = i < sentence.size() ? (unsigned char)sentence[i] : ' ';
+            if (isalpha(c) || c == '\'' || c >= 0x80) {
+                inWord = true;
+                if (c >= 0x80) plain = false;
+                if (isalpha(c)) ++letters;
+            } else if (inWord) {
+                if (plain && letters >= 2) ++words;
+                inWord = false;
+                plain = true;
+                letters = 0;
+            }
+        }
+    }
+    return words;
+}
+
 std::string emotionFromSpeech(const std::string& speech) {
     const std::string r = " " + normalizeSpeech(speech) + " ";
     auto any = [&](std::initializer_list<const char*> ps) {

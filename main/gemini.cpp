@@ -422,7 +422,7 @@ static void openGate(bool play) {
     if (play && !s_held.empty()) playPcm(s_held.data(), s_held.size());
     if (!play) {
         s_drop = true;
-        ESP_LOGI(TAG, "follow-up: heard \"%s\": not for him (nothing clear, or not English); not answering",
+        ESP_LOGI(TAG, "follow-up: heard \"%s\": nothing clear in English, so not for him; not answering",
                  s_heard.c_str());
     }
     s_held.clear();
@@ -454,7 +454,7 @@ static void playAudio(const char* b64) {
 }
 
 static void finishReply() {
-    if (s_gate) openGate(s_heard.find_first_not_of(" .") != std::string::npos && !looksForeign(s_heard));
+    if (s_gate) openGate(englishWords(s_heard) >= 2 && !looksForeign(s_said));
     if (s_drop) {  // a follow-up that wasn't for him: the conversation ends quietly
         s_drop = false;
         s_cancelled.store(false);
@@ -549,8 +549,8 @@ static void handleMessage(const std::string& text) {
             if (const cJSON* t = cJSON_GetObjectItem(cJSON_GetObjectItem(sc, "inputTranscription"), "text"))
                 if (cJSON_IsString(t)) {
                     s_heard += t->valuestring;
-                    // Enough of it to tell whether a follow-up was meant for him.
-                    if (s_gate && s_heard.size() >= 6) openGate(!looksForeign(s_heard));
+                    // Real English words (not a phantom Spanish sentence): it's you.
+                    if (s_gate && englishWords(s_heard) >= 2) openGate(true);
                 }
         if (s_discard || s_stage != Stage::WaitReply) {
             if (done) s_discard = false;
@@ -559,6 +559,7 @@ static void handleMessage(const std::string& text) {
             if (const cJSON* t = cJSON_GetObjectItem(cJSON_GetObjectItem(sc, "outputTranscription"), "text")) {
                 if (cJSON_IsString(t)) {
                     s_said += t->valuestring;
+                    if (s_gate && looksForeign(s_said)) openGate(false);  // answering in Spanish: not for him
                     // The face follows his words once there are a few of them.
                     const std::string e = emotionFromSpeech(s_said);
                     if (s_spoke && s_said.size() > 12 && e != s_emotion) {

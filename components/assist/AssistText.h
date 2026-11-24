@@ -71,6 +71,11 @@ std::string emotionFromSpeech(const std::string& speech);
 // Heard words that aren't English (Spanish from a TV: "¿Qué es...?"):
 // inverted ¿ ¡, or two or more accented letters.
 bool looksForeign(const std::string& heard);
+
+// How many English-looking words `heard` has, leaving out any sentence that
+// looksForeign() (Gemini's recognizer sometimes invents a Spanish sentence
+// from near-silence: "¿Qué es el número de serie?").
+int englishWords(const std::string& heard);
 struct SpeakerIntro {
     enum Kind { None, Owner, Guest } kind = None;
     std::string name;  // Guest: their name ("Sarah"); may be empty

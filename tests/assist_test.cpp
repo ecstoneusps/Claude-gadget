@@ -421,6 +421,10 @@ static void test_looks_foreign() {
     CHECK(looksForeign("I had a crème brûlée"));  // (French counts too)
     CHECK(!looksForeign("Tell me a joke."));
     CHECK(!looksForeign("What's the café called?"));  // one accent is fine
+    CHECK(englishWords("¿Qué es el número de serie?") == 0);
+    CHECK(englishWords("¿Qué es el número de serie? Tell me another one.") == 4);
+    CHECK(englishWords("Okay") == 1);
+    CHECK(englishWords("") == 0);
 }
 
 static void test_emotion_from_speech() {
