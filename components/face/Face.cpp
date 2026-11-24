@@ -525,17 +525,22 @@ void Face::drawMonitor(Canvas& cv) const {
     }
     const uint16_t bg = rgb565(4, 14, 6);
     cv.fillScreen(bg);
-    // Columns of bits falling slowly (one step every 350 ms, each column at its
-    // own pace), so most frames only the face changes.
+    // How lively the binary is: dim and slow at rest, bright and quick while
+    // listening, pulsing with his voice while he talks.
+    const bool listening = expr_ == Expression::Listening;
+    float glow = listening ? 1.45f : 0.75f;
+    glow += clampf(talk_, 0, 1) * 0.9f;
+    // Columns of bits falling (each column at its own pace): a step every
+    // 350 ms at rest, every 120 ms while listening.
     const int stepX = (int)(11 * s), stepY = (int)(15 * s);
-    const uint32_t tick = (uint32_t)(timeMs_ / 350.0f);
+    const uint32_t tick = (uint32_t)(timeMs_ / (listening ? 120.0f : 350.0f));
     for (int col = 0, x = (int)(4 * s); x < W; ++col, x += stepX) {
         const uint32_t speed = 1 + hash3(col, 7, 3) % 3;
         const uint32_t fall = tick / speed;
         for (int row = 0, y = (int)(2 * s); y < H; ++row, y += stepY) {
             const uint32_t h = hash3(col, (uint32_t)row - fall, 11);
             if (h % 4 == 0) continue;  // gaps
-            const float k = 0.22f + 0.5f * (float)((h >> 8) % 100) / 100.0f;
+            const float k = (0.22f + 0.5f * (float)((h >> 8) % 100) / 100.0f) * glow;
             drawBit(cv, x, y, (h >> 4) & 1, s, rgb565((int)(tr * k), (int)(tg * k), (int)(tb * k)));
         }
     }

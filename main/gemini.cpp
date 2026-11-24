@@ -418,6 +418,16 @@ static void playPcm(const int16_t* pcm, size_t n) {
     if (!s_cancelled.load()) soundSpeechWrite(pcm, n);
 }
 
+// Was a follow-up really you? Gemini often hears nothing it can write down
+// when it's you (an empty transcript), but when there was only a fan or a TV it
+// "hears" a made-up Spanish sentence ("¿Qué es el número de serie?") and may
+// answer it in English. So: not if all it heard was another language, and not
+// if it's answering in another language.
+static bool followUpWasYou() {
+    if (looksForeign(s_heard) && englishWords(s_heard) < 2) return false;
+    return !looksForeign(s_said);
+}
+
 // A follow-up's answer, held until we know what was heard: let it out, or drop it.
 static void openGate(bool play) {
     if (!s_gate) return;
@@ -428,8 +438,8 @@ static void openGate(bool play) {
         if (s_said.empty())
             ESP_LOGI(TAG, "follow-up: no answer came; going back to waiting for \"Hey Buddy\"");
         else
-            ESP_LOGI(TAG, "follow-up: his answer would be \"%s\": not English, so it wasn't you; not answering",
-                     s_said.c_str());
+            ESP_LOGI(TAG, "follow-up: heard \"%s\", his answer would be \"%s\": not you (noise or a TV); "
+                     "not answering", s_heard.c_str(), s_said.c_str());
     }
     s_held.clear();
     s_held.shrink_to_fit();
@@ -471,7 +481,7 @@ static void finishReply() {
         return;
     }
     if (s_gate && s_usedTool && s_held.empty()) openGate(false);
-    else if (s_gate) openGate(!s_held.empty() && !looksForeign(s_said));
+    else if (s_gate) openGate(!s_held.empty() && followUpWasYou());
     if (s_drop) {  // a follow-up that wasn't for him: the conversation ends quietly
         s_drop = false;
         s_cancelled.store(false);
@@ -580,7 +590,7 @@ static void handleMessage(const std::string& text) {
                     s_said += t->valuestring;
                     // A follow-up's answer, once a few words of it are in: in English it
                     // was you; answering in another language means it heard a TV or noise.
-                    if (s_gate && s_said.size() >= 15) openGate(!looksForeign(s_said));
+                    if (s_gate && s_said.size() >= 40) openGate(followUpWasYou());
                     // The face follows his words once there are a few of them.
                     const std::string e = emotionFromSpeech(s_said);
                     if (s_spoke && s_said.size() > 12 && e != s_emotion) {
