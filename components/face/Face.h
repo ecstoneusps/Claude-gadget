@@ -62,6 +62,11 @@ struct FaceParams {
 
 FaceParams paramsFor(Expression e);
 
+// How the face is drawn. Classic: the puppy's two eyes and mouth. Monitor: a
+// computer-screen head, white emoticon face turned on its side (mouth on the
+// left, eyes stacked on the right) over scrolling green binary.
+enum class FaceStyle : uint8_t { Classic, Monitor };
+
 class Face {
 public:
     Face();
@@ -87,8 +92,12 @@ public:
     void blinkNow();
     void setAutoBlink(bool on) { autoBlink_ = on; }
     void setSeed(uint32_t seed) { rng_ = seed ? seed : 1; }
+    void setStyle(FaceStyle s) { style_ = s; }
+    FaceStyle style() const { return style_; }
 
 private:
+    void drawMonitor(Canvas& c) const;
+    FaceStyle style_ = FaceStyle::Classic;
     float rand01();
     float randRange(float a, float b) { return a + (b - a) * rand01(); }
 

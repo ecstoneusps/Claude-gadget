@@ -30,6 +30,14 @@ struct AssistantConfig {
     bool memory = true;       // "remember that ...": notes on the SD card, given to the AI
     bool learn = true;        // after a chat, the AI picks out lasting facts and adds them to the notes
     std::string voiceIdUrl;   // voice recognition service ("" = off): owner or someone else?
+    // brain = gemini (see gemini.h): the settings above about Home Assistant aren't used.
+    bool gemini = false;
+    std::string geminiKey;    // never logged
+    std::string geminiModel;
+    std::string geminiVoice;
+    std::string buddyName;
+    std::string ownerName;
+    std::string personality;
 };
 
 // What the UI should show, posted to the queue given to assistantStart().

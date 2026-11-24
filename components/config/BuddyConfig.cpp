@@ -151,6 +151,34 @@ void parseConfig(const std::string& text, BuddyConfig& cfg, std::vector<std::str
             if (v == "puppy") cfg.puppyVoice = true;
             else if (v == "robot") cfg.puppyVoice = false;
             else bad("must be puppy or robot");
+        } else if (key == "face_style") {
+            const std::string v = lower(val);
+            if (v == "puppy" || v == "classic") cfg.monitorFace = false;
+            else if (v == "monitor") cfg.monitorFace = true;
+            else bad("must be puppy or monitor");
+        } else if (key == "brain") {
+            const std::string v = lower(val);
+            if (v == "home_assistant" || v == "homeassistant" || v == "ha") cfg.geminiBrain = false;
+            else if (v == "gemini") cfg.geminiBrain = true;
+            else bad("must be home_assistant or gemini");
+        } else if (key == "gemini_key") {
+            if (val.find(' ') != std::string::npos) bad("must not contain spaces");
+            else cfg.geminiKey = val;
+        } else if (key == "gemini_model") {
+            if (val.empty() || val.find(' ') != std::string::npos) bad("must be a model name like gemini-3.1-flash-live-preview");
+            else cfg.geminiModel = val.rfind("models/", 0) == 0 ? val.substr(7) : val;
+        } else if (key == "gemini_voice") {
+            if (val.empty() || val.find(' ') != std::string::npos) bad("must be a voice name like Puck");
+            else cfg.geminiVoice = val;
+        } else if (key == "buddy_name") {
+            if (val.empty() || val.size() > 32) bad("must be 1-32 characters");
+            else cfg.buddyName = val;
+        } else if (key == "owner_name") {
+            if (val.size() > 32) bad("can be at most 32 characters");
+            else cfg.ownerName = val;
+        } else if (key == "personality") {
+            if (val.size() > 600) bad("can be at most 600 characters");
+            else cfg.personality = val;
         } else if (key == "screen_flip") {
             if (!parseBool(val, cfg.screenFlip)) bad("must be on or off");
         } else if (key == "brightness") {
@@ -326,6 +354,19 @@ void addAiSection(std::string& t) {
              "say hello out loud when you come back after this long away (0 = off)");
     add(buf);
     add("");
+    add("# --- Or: Gemini as his brain (no Home Assistant or PC needed) ---");
+    add("# brain = gemini talks to Google's Gemini directly over the internet: get a free");
+    add("# API key at aistudio.google.com (Get API key). Keep this card private.");
+    snprintf(buf, sizeof buf, "%-28s = %-6s # %s", "brain", d.geminiBrain ? "gemini" : "home_assistant",
+             "home_assistant (the settings above) or gemini (the ones below)");
+    add(buf);
+    str("gemini_key", d.geminiKey, "your Gemini API key (from aistudio.google.com)");
+    str("gemini_model", d.geminiModel, "the Gemini Live model to talk to");
+    str("gemini_voice", d.geminiVoice, "his voice: Puck, Charon, Kore, Fenrir, Aoede, Leda, Orus, Zephyr...");
+    str("buddy_name", d.buddyName, "his name");
+    str("owner_name", d.ownerName, "your first name, so he knows who he lives with");
+    str("personality", d.personality, "optional: more about how he is, in \"quotes\" (e.g. \"a sarcastic robot who loves Roblox\")");
+    add("");
     add("# --- Home Assistant sensors and controls (MQTT, through the Mosquitto add-on) ---");
     add("# Buddy shows up in Home Assistant as the device \"Desk Buddy\": at desk, light level,");
     add("# mood..., plus volume, \"say\" and more. Home network only.");
@@ -465,6 +506,9 @@ std::string defaultConfigText() {
     add(buf);
     num("brightness", d.brightness, "screen brightness, 0-100");
     onoff("screen_flip", d.screenFlip, "on: CoreS3 turned around in the puppy head (camera at the top)");
+    snprintf(buf, sizeof buf, "%-28s = %-6s # %s", "face_style", d.monitorFace ? "monitor" : "puppy",
+             "puppy (eyes and a mouth) or monitor (a computer-screen head: sideways face over green binary)");
+    add(buf);
     num("dim_brightness", d.dimBrightness, "brightness while dozing, 0-100");
     add("");
     add("# --- Sleepiness ---");

@@ -62,6 +62,11 @@ bool isCancelRequest(const std::string& heard);
 // The AI's reply only asks you to repeat or rephrase ("I didn't catch that,
 // could you say it again?"): no follow-up listening after it.
 bool isClarifyRequest(const std::string& reply);
+
+// The face for a spoken reply with no emotion tag (Gemini speaks its answers
+// itself, so there's no "[happy]" to read): a guess from the words, as an
+// emotion name ("laughing", "sad", ...; "happy" when nothing stands out).
+std::string emotionFromSpeech(const std::string& speech);
 struct SpeakerIntro {
     enum Kind { None, Owner, Guest } kind = None;
     std::string name;  // Guest: their name ("Sarah"); may be empty

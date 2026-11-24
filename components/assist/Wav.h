@@ -23,6 +23,24 @@ size_t wavResampledLength(const WavInfo& info, int rate);
 // number written.
 size_t wavToMono(const uint8_t* data, const WavInfo& info, int rate, int16_t* out, size_t outCap);
 
+// Changes the sample rate of audio that arrives a piece at a time (Gemini's
+// 24 kHz speech -> the speaker's 16 kHz), by linear interpolation, carrying
+// the position over from one piece to the next.
+class StreamResampler {
+public:
+    StreamResampler(int inRate, int outRate) : step_((double)inRate / outRate) {}
+    // Most samples `n` input samples can make (for sizing `out`).
+    size_t maxOut(size_t n) const { return (size_t)(n / step_) + 2; }
+    size_t process(const int16_t* in, size_t n, int16_t* out, size_t cap);
+    void reset() { pos_ = 0; havePrev_ = false; }
+
+private:
+    double step_;
+    double pos_ = 0;       // next output position, in input samples, from the previous piece's last sample
+    int16_t prev_ = 0;     // the previous piece's last sample
+    bool havePrev_ = false;
+};
+
 // Makes a spoken reply as loud and clear as the CoreS3's small speaker allows,
 // a piece at a time as it streams in: cuts the bass it can't reproduce (below
 // ~250 Hz, which only wastes loudness), applies a fixed gain, and soft-limits

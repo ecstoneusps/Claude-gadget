@@ -11,6 +11,7 @@ speech_boost                 = 8      # extra loudness for his voice in dB, 0-15
 sound_style                  = puppy  # puppy (yips, barks, panting) or robot (chirps, boops); sounds/<name>.wav on the card replaces one
 brightness                   = 63     # screen brightness, 0-100
 screen_flip                  = on     # on: CoreS3 turned around in the puppy head (camera at the top)
+face_style                   = puppy  # puppy (eyes and a mouth) or monitor (a computer-screen head: sideways face over green binary)
 dim_brightness               = 8      # brightness while dozing, 0-100
 
 # --- Sleepiness ---
@@ -72,6 +73,17 @@ memory                       = on     # "remember that ..." notes, kept in memor
 learn                        = on     # after a chat, the AI adds lasting facts it heard to memories.txt (check them on the settings page)
 voice_id_url                 =        # optional: voice recognition on the PC (tools/voiceid), e.g. http://192.168.1.30:8095
 welcome_back_minutes         = 20     # say hello out loud when you come back after this long away (0 = off)
+
+# --- Or: Gemini as his brain (no Home Assistant or PC needed) ---
+# brain = gemini talks to Google's Gemini directly over the internet: get a free
+# API key at aistudio.google.com (Get API key). Keep this card private.
+brain                        = home_assistant # home_assistant (the settings above) or gemini (the ones below)
+gemini_key                   =        # your Gemini API key (from aistudio.google.com)
+gemini_model                 = gemini-3.1-flash-live-preview # the Gemini Live model to talk to
+gemini_voice                 = Puck   # his voice: Puck, Charon, Kore, Fenrir, Aoede, Leda, Orus, Zephyr...
+buddy_name                   = Buddy  # his name
+owner_name                   =        # your first name, so he knows who he lives with
+personality                  =        # optional: more about how he is, in "quotes" (e.g. "a sarcastic robot who loves Roblox")
 
 # --- Home Assistant sensors and controls (MQTT, through the Mosquitto add-on) ---
 # Buddy shows up in Home Assistant as the device "Desk Buddy": at desk, light level,

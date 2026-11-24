@@ -106,3 +106,25 @@ void SpeechShaper::process(int16_t* pcm, size_t n) {
         pcm[i] = (int16_t)(v * 32767.0f + (v < 0 ? -0.5f : 0.5f));
     }
 }
+
+size_t StreamResampler::process(const int16_t* in, size_t n, int16_t* out, size_t cap) {
+    if (n == 0) return 0;
+    // Positions are measured from "sample -1" = the previous piece's last one
+    // (or the first sample, at the very start), so no gap appears between pieces.
+    const int16_t before = havePrev_ ? prev_ : in[0];
+    size_t written = 0;
+    while (written < cap) {
+        const double p = pos_;           // in [0, n]: 0 = `before`, k = in[k-1]
+        const size_t i = (size_t)p;
+        if (i >= n) break;               // needs in[i] (as the "next" sample)
+        const double frac = p - (double)i;
+        const int a = i == 0 ? before : in[i - 1];
+        const int b = in[i];
+        out[written++] = (int16_t)(a + (b - a) * frac);
+        pos_ += step_;
+    }
+    pos_ -= (double)n;
+    prev_ = in[n - 1];
+    havePrev_ = true;
+    return written;
+}

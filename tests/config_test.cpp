@@ -260,6 +260,26 @@ static void test_vision_settings() {
     CHECK(w.size() == 2);  // set twice, and not a model name
 }
 
+static void test_gemini_brain_and_monitor_face() {
+    BuddyConfig cfg;
+    std::vector<std::string> w;
+    CHECK(!cfg.geminiBrain && !cfg.monitorFace && cfg.buddyName == "Buddy");
+    parseConfig("wifi_name = Home\nwifi_password = secret123\nbrain = gemini\nface_style = Monitor\n"
+                "gemini_key = AIzaKEY\ngemini_model = models/gemini-x-live\ngemini_voice = Kore\n"
+                "buddy_name = Badware\nowner_name = Sam\npersonality = \"a dry, funny robot # who loves games\"\n",
+                cfg, w);
+    CHECK(w.empty());
+    CHECK(cfg.geminiBrain && cfg.monitorFace && cfg.geminiKey == "AIzaKEY" && cfg.geminiModel == "gemini-x-live");
+    CHECK(cfg.geminiVoice == "Kore" && cfg.buddyName == "Badware" && cfg.ownerName == "Sam");
+    CHECK(cfg.personality == "a dry, funny robot # who loves games");
+    CHECK(cfg.aiConfigured());  // no Home Assistant needed
+    parseConfig("brain = robot\nface_style = round\ngemini_key = has space\n", cfg, w);
+    CHECK(w.size() == 3 && cfg.geminiBrain && cfg.monitorFace);
+    BuddyConfig ha;
+    parseConfig("wifi_name = Home\nwifi_password = secret123\ngemini_key = AIzaKEY\n", ha, w);
+    CHECK(!ha.aiConfigured());  // brain is still home_assistant, which isn't set up
+}
+
 static void test_radar_settings() {
     BuddyConfig cfg;
     std::vector<std::string> w;
@@ -304,6 +324,7 @@ int main(int argc, char** argv) {
         {"duplicate settings", test_duplicate_settings},
         {"radar settings", test_radar_settings},
         {"vision settings", test_vision_settings},
+        {"gemini brain and monitor face", test_gemini_brain_and_monitor_face},
         {"set a value in the file", test_set_value},
         {"upgrade adds single missing settings", test_upgrade_adds_single_missing_settings},
         {"repo copy of settings.txt matches firmware", test_repo_copy_matches_firmware_default},

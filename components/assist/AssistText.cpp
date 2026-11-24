@@ -303,6 +303,24 @@ bool isClarifyRequest(const std::string& reply) {
     return false;
 }
 
+std::string emotionFromSpeech(const std::string& speech) {
+    const std::string r = " " + normalizeSpeech(speech) + " ";
+    auto any = [&](std::initializer_list<const char*> ps) {
+        for (const char* p : ps)
+            if (r.find(p) != std::string::npos) return true;
+        return false;
+    };
+    if (any({" haha", " hehe", " lol ", " ha ha ", " thats hilarious ", " so funny ", " joke "})) return "laughing";
+    if (any({" sorry ", " oh no ", " thats sad ", " too bad ", " unfortunately ", " i miss "})) return "sad";
+    if (any({" wow ", " whoa ", " woah ", " no way ", " really ", " amazing ", " incredible "})) return "surprised";
+    if (any({" love ", " aww ", " adorable ", " sweet "})) return "loving";
+    if (any({" hmm ", " let me think ", " i wonder ", " good question "})) return "thinking";
+    if (any({" yawn ", " sleepy ", " tired ", " good night ", " goodnight "})) return "sleepy";
+    if (any({" just kidding ", " wink ", " between you and me "})) return "winking";
+    if (any({" cool ", " awesome ", " sweet ride ", " nice "})) return "cool";
+    return "happy";
+}
+
 namespace {
 std::vector<std::string> wordsOf(const std::string& text) {
     std::vector<std::string> out;

@@ -389,6 +389,13 @@ static void voiceInitTask(void*) {
         ac.memory = config.memory;
         ac.learn = config.learn;
         ac.voiceIdUrl = config.voiceIdUrl;
+        ac.gemini = config.geminiBrain;
+        ac.geminiKey = config.geminiKey;
+        ac.geminiModel = config.geminiModel;
+        ac.geminiVoice = config.geminiVoice;
+        ac.buddyName = config.buddyName;
+        ac.ownerName = config.ownerName;
+        ac.personality = config.personality;
         aiStarted.store(assistantStart(ac, assistEvents));
     }
     vTaskDelete(nullptr);
@@ -433,7 +440,12 @@ static void loadSettings() {
              config.volume, config.brightness, config.sleepAfterSeconds,
              config.faceTracking ? "on" : "off", config.proximity ? "on" : "off");
     // Never log the token or password themselves.
-    if (config.aiConfigured()) {
+    if (config.aiConfigured() && config.geminiBrain) {
+        std::string nets;
+        for (const auto& n : config.wifiNetworks()) nets += (nets.empty() ? "\"" : ", \"") + n.first + "\"";
+        ESP_LOGI(TAG, "AI conversation: Wi-Fi %s, brain Gemini (%s, voice %s), key set (%u chars)", nets.c_str(),
+                 config.geminiModel.c_str(), config.geminiVoice.c_str(), (unsigned)config.geminiKey.size());
+    } else if (config.aiConfigured()) {
         std::string nets;
         for (const auto& n : config.wifiNetworks()) nets += (nets.empty() ? "\"" : ", \"") + n.first + "\"";
         ESP_LOGI(TAG, "AI conversation: Wi-Fi %s, Home Assistant %s%s%s, voice assistant \"%s\", token set (%u chars)",
@@ -443,9 +455,13 @@ static void loadSettings() {
     } else if (!config.conversation) {
         ESP_LOGI(TAG, "AI conversation: off (conversation = off)");
     } else {
-        ESP_LOGI(TAG, "AI conversation: not set up (missing%s%s%s in settings.txt)",
-                 config.wifiNetworks().empty() ? " wifi_name" : "", config.haUrl.empty() ? " ha_url" : "",
-                 config.haToken.empty() ? " ha_token" : "");
+        if (config.geminiBrain)
+            ESP_LOGI(TAG, "AI conversation: not set up (brain = gemini; missing%s%s in settings.txt)",
+                     config.wifiNetworks().empty() ? " wifi_name" : "", config.geminiKey.empty() ? " gemini_key" : "");
+        else
+            ESP_LOGI(TAG, "AI conversation: not set up (missing%s%s%s in settings.txt)",
+                     config.wifiNetworks().empty() ? " wifi_name" : "", config.haUrl.empty() ? " ha_url" : "",
+                     config.haToken.empty() ? " ha_token" : "");
     }
 }
 
@@ -1021,6 +1037,7 @@ extern "C" void app_main(void) {
     }
 
     face.setSeed(esp_random());
+    face.setStyle(config.monitorFace ? FaceStyle::Monitor : FaceStyle::Classic);
     settingsBegin();
     buddy.setMuted(settingsGetBool("muted", false));
     voiceEvents = xQueueCreate(8, sizeof(VoiceEvent));

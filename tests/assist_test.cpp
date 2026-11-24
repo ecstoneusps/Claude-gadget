@@ -1,3 +1,4 @@
+#include <cstdlib>
 // Native unit tests for the AI-conversation text and audio helpers. Run: tests/run_tests.sh
 #include <stdio.h>
 #include <math.h>
@@ -396,7 +397,36 @@ static void test_speaker_intro() {
     CHECK_EQ(ownerNameFromNotes({"my dog's name is King"}), "");
 }
 
+static void test_stream_resampler() {
+    // 24 kHz -> 16 kHz in uneven pieces: 2/3 as many samples, a smooth ramp stays smooth.
+    StreamResampler r(24000, 16000);
+    std::vector<int16_t> in(2400), out;
+    for (size_t i = 0; i < in.size(); ++i) in[i] = (int16_t)(i * 10);
+    size_t pos = 0;
+    for (size_t piece : {7u, 500u, 1u, 893u, 999u}) {
+        int16_t buf[1000];
+        const size_t n = r.process(in.data() + pos, piece, buf, r.maxOut(piece));
+        CHECK(n <= r.maxOut(piece));
+        out.insert(out.end(), buf, buf + n);
+        pos += piece;
+    }
+    CHECK(pos == in.size());
+    CHECK(out.size() >= 1598 && out.size() <= 1601);
+    for (size_t i = 2; i < out.size(); ++i) CHECK(std::abs((out[i] - out[i - 1]) - 15) <= 1);
+}
+
+static void test_emotion_from_speech() {
+    CHECK(emotionFromSpeech("Haha, that's a good one!") == "laughing");
+    CHECK(emotionFromSpeech("Oh no, I'm sorry to hear that.") == "sad");
+    CHECK(emotionFromSpeech("Whoa, really? That's huge.") == "surprised");
+    CHECK(emotionFromSpeech("Hmm, let me think about that.") == "thinking");
+    CHECK(emotionFromSpeech("Sure, it's sunny and 72 degrees.") == "happy");
+    CHECK(emotionFromSpeech("") == "happy");
+}
+
 int main() {
+    test_emotion_from_speech();
+    test_stream_resampler();
     test_split_leading_tag();
     test_split_no_tag();
     test_split_several_tags_first_wins();

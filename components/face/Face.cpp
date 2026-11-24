@@ -1,6 +1,7 @@
 #include "Face.h"
 #include <math.h>
 #include <string.h>
+#include <algorithm>
 
 namespace {
 
@@ -321,6 +322,10 @@ void Face::update(uint32_t dtMsInt) {
 }
 
 void Face::draw(Canvas& cv) const {
+    if (style_ == FaceStyle::Monitor) {
+        drawMonitor(cv);
+        return;
+    }
     const int W = cv.width(), H = cv.height();
     const float s = fminf(W / 320.0f, H / 240.0f);
     const uint16_t bg = 0x0000;
@@ -453,6 +458,140 @@ void Face::draw(Canvas& cv) const {
         const float ty = (mOpen > 0.04f && k > 3 * s) ? my - k * 0.4f + (4 + mOpen * 26) * s * 0.9f
                                                       : my + k * 0.5f + 6 * s;
         cv.fillEllipse((int)tx, (int)ty, (int)(mw * 0.17f * t), (int)(11 * s * t),
+                       rgb565((int)(255 * t), (int)(95 * t), (int)(140 * t)));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Monitor style: a computer-screen head. The face is a big white emoticon
+// lying on its side, read like "(:" -- the mouth on the left, the two eyes
+// stacked on the right -- over columns of slowly falling 0s and 1s. The same
+// tweened parameters drive it, so every expression, blink, glance and the
+// talking mouth carry over; they're just drawn turned a quarter turn.
+
+namespace {
+// A tiny 0 or 1 made of rectangles (no font needed): about 6x9 at 320x240.
+void drawBit(Canvas& cv, int x, int y, bool one, float s, uint16_t c) {
+    const int w = (int)(6 * s), h = (int)(9 * s), t = std::max(1, (int)(1.6f * s));
+    if (one) {
+        cv.fillRect(x + w / 2 - t / 2, y, t, h, c);
+        cv.fillRect(x + w / 2 - t / 2 - t, y + t, t, t, c);  // the little flag
+    } else {
+        cv.fillRect(x, y, w, t, c);
+        cv.fillRect(x, y + h - t, w, t, c);
+        cv.fillRect(x, y, t, h, c);
+        cv.fillRect(x + w - t, y, t, h, c);
+    }
+}
+
+uint32_t hash3(uint32_t a, uint32_t b, uint32_t c) {
+    uint32_t h = a * 0x9E3779B1u ^ (b + 0x7F4A7C15u) * 0x85EBCA77u ^ (c + 0x165667B1u) * 0xC2B2AE3Du;
+    h ^= h >> 15;
+    h *= 0x2C1B3C6Du;
+    h ^= h >> 12;
+    return h;
+}
+}  // namespace
+
+void Face::drawMonitor(Canvas& cv) const {
+    const int W = cv.width(), H = cv.height();
+    const float s = fminf(W / 320.0f, H / 240.0f);
+    const FaceParams& p = cur_;
+
+    // The binary's colour follows the mood: green as a rule, red when sad or
+    // cross, brighter while listening, amber while thinking, pink for love.
+    int tr = 40, tg = 200, tb = 70;
+    switch (expr_) {
+        case Expression::Sad: case Expression::Crying: case Expression::Angry: tr = 210; tg = 55; tb = 55; break;
+        case Expression::Listening: tr = 70; tg = 245; tb = 130; break;
+        case Expression::Thinking: tr = 215; tg = 190; tb = 60; break;
+        case Expression::Love: case Expression::Embarrassed: tr = 235; tg = 90; tb = 170; break;
+        case Expression::Sleepy: tr = 20; tg = 95; tb = 45; break;
+        default: break;
+    }
+    const uint16_t bg = rgb565(4, 14, 6);
+    cv.fillScreen(bg);
+    // Columns of bits falling slowly (one step every 350 ms, each column at its
+    // own pace), so most frames only the face changes.
+    const int stepX = (int)(11 * s), stepY = (int)(15 * s);
+    const uint32_t tick = (uint32_t)(timeMs_ / 350.0f);
+    for (int col = 0, x = (int)(4 * s); x < W; ++col, x += stepX) {
+        const uint32_t speed = 1 + hash3(col, 7, 3) % 3;
+        const uint32_t fall = tick / speed;
+        for (int row = 0, y = (int)(2 * s); y < H; ++row, y += stepY) {
+            const uint32_t h = hash3(col, (uint32_t)row - fall, 11);
+            if (h % 4 == 0) continue;  // gaps
+            const float k = 0.22f + 0.5f * (float)((h >> 8) % 100) / 100.0f;
+            drawBit(cv, x, y, (h >> 4) & 1, s, rgb565((int)(tr * k), (int)(tg * k), (int)(tb * k)));
+        }
+    }
+
+    const bool dim = expr_ == Expression::Sleepy;
+    const uint16_t white = dim ? rgb565(150, 160, 150) : rgb565(240, 245, 240);
+
+    float blink = 1.0f;
+    if (blinkPhase_ >= 0) blink = fabsf(blinkPhase_ - kBlinkMs / 2) / (kBlinkMs / 2);
+    const float openBoth = clampf(p.openness * blink, 0, 1);
+    // Breathing and laughing move along the face's up-down, which is the
+    // screen's left-right here; glances follow the turn too.
+    const float breath = sinf(timeMs_ * 2 * kPi / kBreathMs) * 2.5f * s
+                       + fabsf(sinf(timeMs_ * 2 * kPi / 360.0f)) * -6.0f * s * clampf(p.bounce, 0, 1);
+    const float faceLookX = clampf(lookX_ + p.lookX, -1, 1), faceLookY = clampf(lookY_ + p.lookY, -1, 1);
+    const float gx = -faceLookY * 14 * s - breath;  // face up = screen right
+    const float gy = faceLookX * 18 * s;
+
+    // Eyes: two tall ovals, one above the other. A blink squashes them
+    // sideways (that's "down" for this face); heavy lids narrow them.
+    const float ex = W * 0.68f + gx;
+    for (int side = -1; side <= 1; side += 2) {
+        const float sc = side < 0 ? p.eyeScaleL : p.eyeScaleR;
+        const float open = clampf(openBoth * (side < 0 ? p.opennessL : p.opennessR), 0, 1)
+                         * (1.0f - 0.45f * clampf(p.lidTop, 0, 1) - 0.35f * clampf(p.lidBottom, 0, 1));
+        const float ay = 0.62f * p.eyeW * s * sc;
+        const float ax = fmaxf(0.36f * p.eyeH * s * sc * open, 4 * s);
+        const float ey = H * 0.5f + side * 50 * s + gy;
+        cv.fillEllipse((int)ex, (int)ey, (int)ax, (int)ay, white);
+    }
+
+    // Mouth: big, along the left side. Face-space "up" is screen +x, so a
+    // smile -- corners up toward the eyes -- is a "(" opening to the right.
+    const float mx = W * 0.36f + gx * 0.6f;
+    const float my = H * 0.5f + gy * 0.6f + p.mouthSkew * 20 * s;
+    const float mh = p.mouthW * s * 2.6f;           // its length, top to bottom
+    const float k = p.mouthCurve * 34 * s;          // how curved
+    const float thick = 10 * s;
+    const float mOpen = clampf(p.mouthOpen + talk_ * 0.8f, 0, 1);
+    if (mOpen <= 0.04f) {
+        const int N = 40;
+        for (int i = 0; i <= N; ++i) {
+            const float u = (float)i / N * 2 - 1;
+            const float py = my + u * mh / 2;
+            const float px = mx - (k * (1 - u * u) - k * 0.5f) - p.mouthSkew * u * 14 * s;
+            cv.fillCircle((int)px, (int)py, (int)thick, white);
+        }
+    } else if (k > 12 * s) {
+        // Open grin: a "D" turned on its side, flat edge toward the eyes.
+        const float ry = mh * 0.5f, rx = 12 * s + mOpen * 52 * s;
+        const float x0 = mx + k * 0.4f;
+        const int N = 18;
+        for (int i = 0; i < N; ++i) {
+            const float a0 = kPi / 2 + kPi * i / N, a1 = kPi / 2 + kPi * (i + 1) / N;
+            cv.fillTriangle((int)x0, (int)my, (int)(x0 + rx * cosf(a0)), (int)(my + ry * sinf(a0)),
+                            (int)(x0 + rx * cosf(a1)), (int)(my + ry * sinf(a1)), white);
+        }
+    } else {
+        // Open "O" (talking, surprised): a thick ring.
+        const float ry = fmaxf(mh * 0.3f, 22 * s) * (0.7f + 0.3f * mOpen);
+        const float rx = 8 * s + mOpen * 18 * s;
+        const int N = 36;
+        for (int i = 0; i < N; ++i) {
+            const float a = 2 * kPi * i / N;
+            cv.fillCircle((int)(mx + rx * cosf(a)), (int)(my + ry * sinf(a)), (int)(thick * 0.85f), white);
+        }
+    }
+    if (p.tongue > 0.05f) {  // silly: tongue poking out the bottom of the mouth
+        const float t = clampf(p.tongue, 0, 1);
+        cv.fillEllipse((int)(mx - 14 * s), (int)(my + mh * 0.18f), (int)(16 * s * t), (int)(11 * s * t),
                        rgb565((int)(255 * t), (int)(95 * t), (int)(140 * t)));
     }
 }

@@ -19,6 +19,7 @@
 #include "AssistText.h"
 #include "Wav.h"
 #include "audio_io.h"
+#include "gemini.h"
 #include "cpustats.h"
 #include "memory.h"
 #include "photonotes.h"
@@ -37,6 +38,7 @@ static constexpr uint32_t kIntentMs = 90000;       // the AI's answer (a cold mo
 static constexpr uint32_t kConversationMs = 300000;  // keep the same conversation (memory) this long
 
 static AssistantConfig s_cfg;
+static bool s_gemini = false;  // brain = gemini: everything public is handed to gemini.cpp
 static QueueHandle_t s_events = nullptr;
 static QueueHandle_t s_inbox = nullptr;  // std::string* JSON messages from the websocket task
 static StreamBufferHandle_t s_audio = nullptr;
@@ -1654,6 +1656,10 @@ void assistantPhotoTaken(uint8_t* jpeg, size_t len, const std::string& name) {
 }
 
 bool assistantStart(const AssistantConfig& cfg, QueueHandle_t events) {
+    if (cfg.gemini) {
+        s_gemini = geminiStart(cfg, events);
+        return s_gemini;
+    }
     if (cfg.url.empty() || cfg.token.empty()) return false;
     s_cfg = cfg;
     s_events = events;
@@ -1689,10 +1695,11 @@ bool assistantStart(const AssistantConfig& cfg, QueueHandle_t events) {
     return true;
 }
 
-bool assistantAvailable() { return s_ready.load() && !s_turnActive.load(); }
-const char* assistantStatus() { return s_status.load(); }
+bool assistantAvailable() { return s_gemini ? geminiAvailable() : s_ready.load() && !s_turnActive.load(); }
+const char* assistantStatus() { return s_gemini ? geminiStatus() : s_status.load(); }
 
 bool assistantBeginTurn(bool followUp) {
+    if (s_gemini) return geminiBeginTurn(followUp);
     if (!followUp) s_cancelled.store(false);  // a fresh "Hey Buddy"
     s_turnLen.store(0);
     ++s_turnGen;
@@ -1709,6 +1716,7 @@ bool assistantBeginTurn(bool followUp) {
 }
 
 void assistantAudio(const int16_t* pcm, int samples) {
+    if (s_gemini) return geminiAudio(pcm, samples);
     if (s_turnPcm && s_accepting.load()) {  // a copy for voice recognition
         const size_t have = s_turnLen.load();
         const size_t n = std::min((size_t)samples, kTurnMaxSamples - have);
@@ -1722,6 +1730,7 @@ void assistantAudio(const int16_t* pcm, int samples) {
 }
 
 void assistantEndAudio(bool heardSpeech) {
+    if (s_gemini) return geminiEndAudio(heardSpeech);
     // Who was that? (Not while recording voice samples, which go to /enroll instead.)
     if (heardSpeech && s_voiceIdTask && s_enrollLeft == 0 && s_voiceEnrolled.load()) xTaskNotifyGive(s_voiceIdTask);
     s_heardSpeech.store(heardSpeech);
@@ -1729,12 +1738,13 @@ void assistantEndAudio(bool heardSpeech) {
     if (heardSpeech) post(AssistEvent::Thinking);
 }
 
-bool assistantSttDone() { return s_sttDone.load(); }
-bool assistantWantsLongAnswer() { return s_enrollLeft > 0; }
+bool assistantSttDone() { return !s_gemini && s_sttDone.load(); }
+bool assistantWantsLongAnswer() { return !s_gemini && s_enrollLeft > 0; }
 
-bool assistantCanSee() { return !s_cfg.visionUrl.empty() && s_ready.load(); }
+bool assistantCanSee() { return !s_gemini && !s_cfg.visionUrl.empty() && s_ready.load(); }
 
 bool assistantSay(const std::string& text) {
+    if (s_gemini) return geminiSay(text);
     if (!s_inbox || !s_ready.load()) return false;
     bool expected = false;
     if (!s_turnActive.compare_exchange_strong(expected, true)) return false;  // mid-conversation
@@ -1749,7 +1759,7 @@ bool assistantSay(const std::string& text) {
 }
 
 void assistantLook(uint8_t* jpeg, size_t len, const std::string& question, bool fromConversation, bool saved) {
-    if (!jpeg || !s_inbox || s_lookJpeg) {  // no photo, not running, or still busy with the last one
+    if (!jpeg || !s_inbox || s_lookJpeg || s_gemini) {  // no photo, not running, or still busy with the last one
         heap_caps_free(jpeg);
         if (fromConversation) {
             s_turnActive.store(false);
@@ -1767,6 +1777,7 @@ void assistantLook(uint8_t* jpeg, size_t len, const std::string& question, bool 
 }
 
 bool assistantCancel() {
+    if (s_gemini) return geminiCancel();
     if (!s_turnActive.load() && !soundSpeaking()) return false;  // no conversation going on
     s_cancelled.store(true);
     soundStopSpeech();

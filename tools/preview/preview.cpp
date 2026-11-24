@@ -15,7 +15,7 @@
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        fprintf(stderr, "usage: %s anim|sheet <out.rgb>\n", argv[0]);
+        fprintf(stderr, "usage: %s anim|sheet <out.rgb> [monitor]\n", argv[0]);
         return 1;
     }
     const int W = 320, H = 240;
@@ -23,10 +23,12 @@ int main(int argc, char** argv) {
     if (!out) return 1;
 
     const int N = (int)Expression::Count;
+    const FaceStyle style = (argc > 3 && strcmp(argv[3], "monitor") == 0) ? FaceStyle::Monitor : FaceStyle::Classic;
     if (strcmp(argv[1], "sheet") == 0) {
         // One settled, non-blinking frame per expression, eyes centered.
         for (int i = 0; i < N; ++i) {
             Face face;
+            face.setStyle(style);
             face.setAutoBlink(false);
             face.setLookAt(0, 0);
             face.setExpression((Expression)i);
@@ -39,6 +41,7 @@ int main(int argc, char** argv) {
     } else {
         // Animated tour: each expression for ~2s, with a "talking" segment.
         Face face;
+        face.setStyle(style);
         face.setSeed(42);
         const int fps = 25, dt = 1000 / fps;
         int frames = 0;

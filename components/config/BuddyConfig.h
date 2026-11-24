@@ -15,6 +15,7 @@ struct BuddyConfig {
     int dimBrightness = 8;         // 0-100
     bool puppyVoice = true;        // sound_style: puppy (yips, barks) or robot (chirps, boops)
     bool screenFlip = true;        // screen_flip: the CoreS3 is mounted turned around (camera at the top, ports down)
+    bool monitorFace = false;      // face_style: puppy (classic eyes and mouth) or monitor (computer-screen head)
 
     // Sleepiness
     int sleepAfterSeconds = 60;
@@ -73,6 +74,16 @@ struct BuddyConfig {
     std::string voiceIdUrl;          // voice recognition service on the PC ("" = off): is it the owner talking?
     int welcomeBackMinutes = 20;     // say hello out loud when you come back after this long away (0 = off)
 
+    // The brain: Home Assistant's voice assistant (home_assistant), or Google's
+    // Gemini directly over the internet (gemini: no Home Assistant or PC needed).
+    bool geminiBrain = false;
+    std::string geminiKey;           // API key from Google AI Studio: never logged
+    std::string geminiModel = "gemini-3.1-flash-live-preview";
+    std::string geminiVoice = "Puck";
+    std::string buddyName = "Buddy";
+    std::string ownerName;           // who he lives with ("" = he doesn't say a name)
+    std::string personality;         // extra words about how he is ("" = the built-in personality)
+
     // "What do you see?": photos go straight to a vision model in Ollama
     std::string visionUrl;           // http://192.168.4.98:11434 ("" = no vision)
     std::string visionModel = "gemma3:4b";
@@ -85,7 +96,10 @@ struct BuddyConfig {
             if (!wifiNameN[i].empty()) out.push_back({wifiNameN[i], wifiPasswordN[i]});
         return out;
     }
-    bool aiConfigured() const { return conversation && !wifiNetworks().empty() && !haUrl.empty() && !haToken.empty(); }
+    bool aiConfigured() const {
+        if (!conversation || wifiNetworks().empty()) return false;
+        return geminiBrain ? !geminiKey.empty() : (!haUrl.empty() && !haToken.empty());
+    }
 };
 
 // Reads settings.txt contents into `cfg` (starting from whatever it holds,
