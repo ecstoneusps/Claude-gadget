@@ -21,3 +21,6 @@ void geminiAudio(const int16_t* pcm, int samples);
 void geminiEndAudio(bool heardSpeech);
 bool geminiSay(const std::string& text);
 bool geminiCancel();
+// The photo Gemini asked for with its look tool (nullptr: the camera failed). Takes the JPEG.
+void geminiLook(uint8_t* jpeg, size_t len);
+bool geminiLookPending();

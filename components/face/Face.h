@@ -93,11 +93,15 @@ public:
     void setAutoBlink(bool on) { autoBlink_ = on; }
     void setSeed(uint32_t seed) { rng_ = seed ? seed : 1; }
     void setStyle(FaceStyle s);
+    // Monitor style: wear the sunglasses whatever the expression (until taken off).
+    void setShades(bool on) { shades_ = on; }
+    bool shades() const { return shades_; }
     FaceStyle style() const { return style_; }
 
 private:
     void drawMonitor(Canvas& c) const;
     FaceStyle style_ = FaceStyle::Classic;
+    bool shades_ = false;
     float rand01();
     float randRange(float a, float b) { return a + (b - a) * rand01(); }
 

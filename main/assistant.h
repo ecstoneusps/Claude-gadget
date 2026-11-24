@@ -53,6 +53,7 @@ struct AssistEvent {
         Look,      // you asked about what it sees (`text`): take a photo, then assistantLook()
         LookSaved, // you asked about a photo it took (`text`): load the newest one, then assistantLook(..., saved = true)
         Cancelled, // "cancel" / "never mind" / "I wasn't talking to you": the conversation is dropped
+        Shades,    // put the sunglasses on (command = 1) or take them off (0)
     } type;
     bool followUp;
     int command;

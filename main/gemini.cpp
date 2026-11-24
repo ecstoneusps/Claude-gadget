@@ -42,7 +42,13 @@ static QueueHandle_t s_events = nullptr;
 static QueueHandle_t s_inbox = nullptr;  // std::string*: messages; nullptr: disconnected; markers below
 static StreamBufferHandle_t s_audio = nullptr;
 static esp_websocket_client_handle_t s_ws = nullptr;
-static std::string s_connectedMarker, s_wakeMarker;
+static std::string s_connectedMarker, s_wakeMarker, s_photoMarker;
+// "What am I holding?": Gemini calls look, the main loop takes a photo and
+// hands it back here, and it goes to Gemini with the answer to the call.
+static std::atomic<bool> s_lookPending{false};
+static uint8_t* s_photo = nullptr;  // main loop -> gemini task (with s_photoMarker)
+static size_t s_photoLen = 0;
+static std::string s_lookId;        // gemini task only: the look call waiting for its photo
 
 static std::atomic<bool> s_started{false};
 static std::atomic<bool> s_keyRejected{false};
@@ -199,6 +205,9 @@ static std::string systemPrompt() {
                "but you're never mean. "
              : "About you: " + s_cfg.personality + " ";
     if (!s_cfg.ownerName.empty()) p += "The person you live with is " + s_cfg.ownerName + ". ";
+    p += "You have a camera in your face: when asked what you see, what they're holding or showing you, or how "
+         "something looks, call look, then answer from the photo. You can wear sunglasses: when asked to put on "
+         "(or take off) your shades or sunglasses, call sunglasses. ";
     p += "If you're asked to remember something, call the remember tool; to forget something, call forget. "
          "Always speak English, even if you hear another language. If what you hear isn't clearly someone "
          "talking to you (a TV, a video, people talking to each other, noise), say nothing at all. ";
@@ -270,6 +279,11 @@ static void sendSetup() {
                                        "The fact, in the third person, e.g. 'his dog is named King'"));
     cJSON_AddItemToArray(decls, fnDecl("forget", "Cross out a fact you'd written down.", "what",
                                        "What to forget, e.g. 'the dog's name'"));
+    cJSON_AddItemToArray(decls, fnDecl("look", "Take a photo with your camera, to see what's in front of you: "
+                                       "what they're holding or showing you, or how they look.", "question",
+                                       "What you want to find out from the photo"));
+    cJSON_AddItemToArray(decls, fnDecl("sunglasses", "Put your sunglasses on, or take them off.", "wear",
+                                       "'on' or 'off'"));
     cJSON_AddItemToArray(tools, fns);
     if (!sendJson(root)) ESP_LOGW(TAG, "couldn't send the session setup");
 }
@@ -318,6 +332,8 @@ static void connect() {
 // Turns.
 
 static void endTurn() {
+    s_lookPending.store(false);  // (a photo arriving now isn't wanted)
+    s_lookId.clear();
     s_accepting.store(false);
     s_stage = Stage::Idle;
     s_turnPending.store(false);
@@ -524,7 +540,20 @@ static void handleToolCall(const cJSON* call) {
     cJSON* fr = cJSON_AddArrayToObject(cJSON_AddObjectToObject(resp, "toolResponse"), "functionResponses");
     const cJSON* fns = cJSON_GetObjectItem(call, "functionCalls");
     const cJSON* fn;
+    int answered = 0;
     cJSON_ArrayForEach(fn, fns) {
+        const cJSON* fname = cJSON_GetObjectItem(fn, "name");
+        if (cJSON_IsString(fname) && strcmp(fname->valuestring, "look") == 0) {
+            // Answered once the photo is taken (geminiLook).
+            const cJSON* id = cJSON_GetObjectItem(fn, "id");
+            const cJSON* q = cJSON_GetObjectItem(cJSON_GetObjectItem(fn, "args"), "question");
+            s_lookId = cJSON_IsString(id) ? id->valuestring : "";
+            s_lookPending.store(true);
+            ESP_LOGI(TAG, "look: \"%s\"; taking a photo", cJSON_IsString(q) ? q->valuestring : "");
+            post(AssistEvent::Look, cJSON_IsString(q) ? q->valuestring : "what do you see?");
+            continue;
+        }
+        ++answered;
         const cJSON* name = cJSON_GetObjectItem(fn, "name");
         const cJSON* args = cJSON_GetObjectItem(fn, "args");
         const char* nm = cJSON_IsString(name) ? name->valuestring : "";
@@ -536,6 +565,14 @@ static void handleToolCall(const cJSON* call) {
             result = fact.empty() ? "nothing to remember"
                      : memoryRemember(fact) == MemoryResult::Added ? "written down" : "already known";
             ESP_LOGI(TAG, "remember \"%s\": %s", fact.c_str(), result.c_str());
+        } else if (strcmp(nm, "sunglasses") == 0) {
+            const cJSON* w = cJSON_GetObjectItem(args, "wear");
+            const bool on = !(cJSON_IsString(w) && strcmp(w->valuestring, "off") == 0);
+            AssistEvent ev{};
+            ev.type = AssistEvent::Shades;
+            ev.command = on ? 1 : 0;
+            xQueueSend(s_events, &ev, pdMS_TO_TICKS(100));
+            result = on ? "they're on" : "they're off";
         } else if (strcmp(nm, "forget") == 0) {
             const cJSON* w = cJSON_GetObjectItem(args, "what");
             const std::string what = cJSON_IsString(w) ? w->valuestring : "";
@@ -550,7 +587,8 @@ static void handleToolCall(const cJSON* call) {
         cJSON_AddStringToObject(cJSON_AddObjectToObject(r, "response"), "result", result.c_str());
         cJSON_AddItemToArray(fr, r);
     }
-    sendJson(resp);
+    if (answered) sendJson(resp);
+    else cJSON_Delete(resp);
     s_usedTool = true;
     s_deadline = nowMs() + kReplyMs;
 }
@@ -637,6 +675,12 @@ static void geminiTask(void*) {
                     s_sayPending.store(false);
                     failTurn(s_keyRejected.load() ? "Gemini didn't accept the key" : "lost the connection to Gemini");
                 }
+            } else if (msg == &s_photoMarker) {
+                uint8_t* jpeg = s_photo;
+                const size_t len = s_photoLen;
+                s_photo = nullptr;
+                if (s_lookPending.load() && s_sessionReady) sendPhoto(jpeg, len);
+                else heap_caps_free(jpeg);
             } else if (msg != &s_wakeMarker) {
                 handleMessage(*msg);
                 delete msg;
@@ -665,6 +709,39 @@ static void geminiTask(void*) {
             s_status.store("idle");
         }
     }
+}
+
+// The photo for a look call: first the picture itself (as part of the
+// conversation), then the answer to the call.
+static void sendPhoto(uint8_t* jpeg, size_t len) {
+    std::string result = "The camera couldn't take a photo just now; say so.";
+    if (jpeg && len) {
+        size_t olen = 0;
+        mbedtls_base64_encode(nullptr, 0, &olen, jpeg, len);
+        unsigned char* b64 = (unsigned char*)psramMalloc(olen + 1);
+        if (b64 && mbedtls_base64_encode(b64, olen + 1, &olen, jpeg, len) == 0) {
+            std::string msg = "{\"clientContent\":{\"turns\":[{\"role\":\"user\",\"parts\":[{\"inlineData\":"
+                              "{\"mimeType\":\"image/jpeg\",\"data\":\"";
+            msg.append((const char*)b64, olen);
+            msg += "\"}},{\"text\":\"(The photo your camera just took.)\"}]}],\"turnComplete\":false}}";
+            if (sendText(msg)) result = "Photo taken: it's the image just sent. Answer from what it shows; if it's "
+                                        "unclear, say you can't quite tell.";
+            ESP_LOGI(TAG, "sent the photo (%u KB)", (unsigned)(len / 1024));
+        }
+        heap_caps_free(b64);
+    }
+    heap_caps_free(jpeg);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON* fr = cJSON_AddArrayToObject(cJSON_AddObjectToObject(resp, "toolResponse"), "functionResponses");
+    cJSON* r = cJSON_CreateObject();
+    if (!s_lookId.empty()) cJSON_AddStringToObject(r, "id", s_lookId.c_str());
+    cJSON_AddStringToObject(r, "name", "look");
+    cJSON_AddStringToObject(cJSON_AddObjectToObject(r, "response"), "result", result.c_str());
+    cJSON_AddItemToArray(fr, r);
+    sendJson(resp);
+    s_lookId.clear();
+    s_lookPending.store(false);
+    s_deadline = nowMs() + kReplyMs;
 }
 
 // ---------------------------------------------------------------------------
@@ -736,6 +813,22 @@ bool geminiSay(const std::string& text) {
     std::string* m = &s_wakeMarker;
     xQueueSend(s_inbox, &m, 0);
     return true;
+}
+
+bool geminiLookPending() { return s_lookPending.load(); }
+
+void geminiLook(uint8_t* jpeg, size_t len) {
+    if (!s_lookPending.load() || s_photo) {  // nobody asked (or still busy with the last one)
+        heap_caps_free(jpeg);
+        return;
+    }
+    s_photo = jpeg;  // (nullptr: the camera failed; Gemini is told so)
+    s_photoLen = len;
+    std::string* m = &s_photoMarker;
+    if (xQueueSend(s_inbox, &m, pdMS_TO_TICKS(200)) != pdTRUE) {
+        heap_caps_free(jpeg);
+        s_photo = nullptr;
+    }
 }
 
 bool geminiCancel() {

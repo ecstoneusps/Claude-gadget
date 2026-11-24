@@ -563,7 +563,7 @@ void Face::drawMonitor(Canvas& cv) const {
     // his character's screen. A blink squashes them sideways (that's "down"
     // for this face); heavy lids narrow them. "Cool": sunglasses instead.
     const float ex = W * 0.68f + gx;
-    if (expr_ == Expression::Cool) {
+    if (expr_ == Expression::Cool || shades_) {
         // White frames with dark glare stripes, the lenses stacked like the eyes.
         for (int side = -1; side <= 1; side += 2) {
             const float cy = H * 0.5f + side * 42 * s + gy;

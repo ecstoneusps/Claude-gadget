@@ -1741,7 +1741,7 @@ void assistantEndAudio(bool heardSpeech) {
 bool assistantSttDone() { return !s_gemini && s_sttDone.load(); }
 bool assistantWantsLongAnswer() { return !s_gemini && s_enrollLeft > 0; }
 
-bool assistantCanSee() { return !s_gemini && !s_cfg.visionUrl.empty() && s_ready.load(); }
+bool assistantCanSee() { return s_gemini ? geminiAvailable() || geminiLookPending() : !s_cfg.visionUrl.empty() && s_ready.load(); }
 
 bool assistantSay(const std::string& text) {
     if (s_gemini) return geminiSay(text);
@@ -1759,7 +1759,8 @@ bool assistantSay(const std::string& text) {
 }
 
 void assistantLook(uint8_t* jpeg, size_t len, const std::string& question, bool fromConversation, bool saved) {
-    if (!jpeg || !s_inbox || s_lookJpeg || s_gemini) {  // no photo, not running, or still busy with the last one
+    if (s_gemini) return geminiLook(jpeg, len);
+    if (!jpeg || !s_inbox || s_lookJpeg) {  // no photo, not running, or still busy with the last one
         heap_caps_free(jpeg);
         if (fromConversation) {
             s_turnActive.store(false);

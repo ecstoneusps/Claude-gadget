@@ -340,8 +340,10 @@ static void lookAtSavedPhoto(const char* question) {
 }
 
 // The AI conversation: thinking, the answer's mood, the mouth while it speaks.
+static uint32_t shadesUntil = 0;
 static void handleAssistant(uint32_t now) {
     if (!aiStarted.load()) return;
+    if (face.shades() && (int32_t)(now - shadesUntil) > 0) face.setShades(false);
     AssistEvent ev;
     while (xQueueReceive(assistEvents, &ev, 0) == pdTRUE) {
         switch (ev.type) {
@@ -361,6 +363,11 @@ static void handleAssistant(uint32_t now) {
             case AssistEvent::Look: startPhoto(true, ev.text, true, now); break;
             case AssistEvent::LookSaved: lookAtSavedPhoto(ev.text); break;
             case AssistEvent::Cancelled: buddy.onFollowUpEnd(now); break;
+            case AssistEvent::Shades:
+                face.setShades(ev.command != 0);
+                shadesUntil = now + 10 * 60 * 1000;  // they come off by themselves after a while
+                ESP_LOGI(TAG, "sunglasses %s", ev.command ? "on" : "off");
+                break;
         }
     }
     buddy.setSpeaking(soundSpeaking(), soundSpeechLevel());
