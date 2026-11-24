@@ -209,8 +209,9 @@ static std::string systemPrompt() {
          "something looks, call look, then answer from the photo. You can wear sunglasses: when asked to put on "
          "(or take off) your shades or sunglasses, call sunglasses. ";
     p += "If you're asked to remember something, call the remember tool; to forget something, call forget. "
-         "Always speak English, even if you hear another language. If what you hear isn't clearly someone "
-         "talking to you (a TV, a video, people talking to each other, noise), say nothing at all. ";
+         "Always speak English, even if you hear another language. A TV, a video, a game, music or narration "
+         "often plays near you: if what you hear is that, or people talking to each other, or noise, rather "
+         "than someone talking to you, reply with only the single word: skip. ";
     if (s_setupLevel.load() == 0) p += "Use Google Search for anything current (news, scores, weather). ";
     if (s_cfg.memory) {
         const std::string notes = memoryPromptBlock();
@@ -356,7 +357,9 @@ static void startTurn() {
     s_turnPending.store(false);
     s_fromVoice = true;
     s_spoke = false;
-    s_gate = s_followUpTurn.load();
+    // Every answer waits for its first words (a follow-up's a little longer):
+    // "skip" means it heard a video, not you.
+    s_gate = true;
     s_drop = false;
     s_usedTool = s_nudged = false;
     s_held.clear();
@@ -439,7 +442,15 @@ static void playPcm(const int16_t* pcm, size_t n) {
 // "hears" a made-up Spanish sentence ("¿Qué es el número de serie?") and may
 // answer it in English. So: not if all it heard was another language, and not
 // if it's answering in another language.
+// "skip": Gemini's own verdict that it heard a video or a TV, not someone talking to it.
+static bool saidSkip() {
+    const std::string n = normalizeSpeech(s_said);
+    return n.rfind("skip", 0) == 0 && n.size() < 12;
+}
+
 static bool followUpWasYou() {
+    if (saidSkip()) return false;
+    if (!s_followUpTurn.load()) return true;  // (after "Hey Buddy" it's you, unless it said skip)
     if (looksForeign(s_heard) && englishWords(s_heard) < 2) return false;
     return !looksForeign(s_said);
 }
@@ -454,8 +465,8 @@ static void openGate(bool play) {
         if (s_said.empty())
             ESP_LOGI(TAG, "follow-up: no answer came; going back to waiting for \"Hey Buddy\"");
         else
-            ESP_LOGI(TAG, "follow-up: heard \"%s\", his answer would be \"%s\": not you (noise or a TV); "
-                     "not answering", s_heard.c_str(), s_said.c_str());
+            ESP_LOGI(TAG, "%s: heard \"%s\", his answer would be \"%s\": not you (a video, a TV or noise); "
+                     "not answering", s_followUpTurn.load() ? "follow-up" : "answer", s_heard.c_str(), s_said.c_str());
     }
     s_held.clear();
     s_held.shrink_to_fit();
@@ -628,7 +639,7 @@ static void handleMessage(const std::string& text) {
                     s_said += t->valuestring;
                     // A follow-up's answer, once a few words of it are in: in English it
                     // was you; answering in another language means it heard a TV or noise.
-                    if (s_gate && s_said.size() >= 40) openGate(followUpWasYou());
+                    if (s_gate && s_said.size() >= (s_followUpTurn.load() ? 40u : 10u)) openGate(followUpWasYou());
                     // The face follows his words once there are a few of them.
                     const std::string e = emotionFromSpeech(s_said);
                     if (s_spoke && s_said.size() > 12 && e != s_emotion) {
