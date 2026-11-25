@@ -40,6 +40,16 @@ TORSO_SOCKETS = {
     "shoulder_r": ((16.5, -1.0, 8.0), (1, 0, 0)),
     "shoulder_l": ((-17.5, -1.0, 8.0), (-1, 0, 0)),
 }
+# Where each socket's outside surface is, along its axis (the torso's faces).
+SOCKET_SURFACE = {"neck": 13.0, "hip_r": -30.0, "hip_l": -30.0, "shoulder_r": 20.0, "shoulder_l": -21.0}
+# The torso, as it lies to print (on its back), is solid from z = 0 to 16 around
+# the sockets; each socket is a ring sticking out between its top and bottom
+# skins, open below. So a socket is filled with a block from the bed up to the
+# top face: nothing hangs in the air (a filled-in ball did, and printed as
+# spaghetti).
+FILL_HALF = 7.5          # half the block's width across the face
+FILL_IN = 8.0            # how far it reaches into the torso past the socket's centre
+FILL_Z = (0.0, 16.0)
 # Part index (by size in the file) -> (ball centre, direction from the ball into its part)
 LIMBS = {
     "arm_a": (2, (42.71, 3.17, 8.82), (1, 0, 0)),
@@ -81,7 +91,14 @@ def diamond_prism(centre, direction, t0, t1, side):
 def static_torso(torso):
     m = from_trimesh(torso)
     for name, (c, out) in TORSO_SOCKETS.items():
-        m = m + Manifold.sphere(SOCKET_R + 0.05, SEG).translate(c)                 # fill the socket
+        axis = int(np.argmax(np.abs(out)))
+        lo, hi = sorted((c[axis] - out[axis] * FILL_IN, SOCKET_SURFACE[name]))
+        r0, r1 = [list(c), list(c)]
+        across = 0 if axis == 1 else 1
+        r0[axis], r1[axis] = lo, hi
+        r0[across], r1[across] = c[across] - FILL_HALF, c[across] + FILL_HALF
+        r0[2], r1[2] = FILL_Z
+        m = m + Manifold.cube(tuple(np.subtract(r1, r0))).translate(tuple(r0))     # fill the socket, from the bed up
         m = m - diamond_prism(np.array(c), out, -(PEG_TIP + 0.3), 30, PEG + 2 * PEG_CLEAR)  # the peg's hole
     return m
 
