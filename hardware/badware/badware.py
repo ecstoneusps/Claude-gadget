@@ -15,6 +15,7 @@ Coordinates (assembled): x across (+x = his left, the viewer's right), y front
 """
 import os
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 import trimesh
@@ -44,7 +45,10 @@ BACK = 10.0
 LIP = 3.0
 Y0, Y1 = -FRONT, SPLIT_Y + BACK
 
-# --- Neck plug: the original ball on a square peg glued into the floor -----------
+# --- Neck plug: the original neck on a square peg glued into the floor, ending in
+# a diamond peg for the static torso (or the original ball, STATIC_NECK = False).
+STATIC_NECK = True
+ORIGINAL_NECK_BALL = (-1.6, 53.55, 51.12)     # the ball's centre in the original file
 PEG = 14.0               # square peg
 PEG_H = 9.0              # how deep it goes into the floor
 NECK_Y = 17.0            # under the CoreS3's middle (its weight)
@@ -175,8 +179,18 @@ def neck_plug():
     neck.apply_scale(BODY_SCALE)
     ball = from_trimesh(neck).translate((0, 0, PEG_H))
     peg = box(-PEG / 2, PEG / 2, -PEG / 2, PEG / 2, 0, PEG_H + 0.5)
-    print(f"neck: {(top - base_z) * BODY_SCALE:.1f} mm of the original's neck and ball, scaled {BODY_SCALE}", file=sys.stderr)
-    return peg + ball
+    print(f"neck: {(top - base_z) * BODY_SCALE:.1f} mm of the original's neck, scaled {BODY_SCALE}", file=sys.stderr)
+    neck_m = peg + ball
+    if STATIC_NECK:
+        # The ball becomes a diamond peg for the static torso (static_body.py),
+        # glued in: the head stays put.
+        import static_body as sb
+        bx, by, bz = ORIGINAL_NECK_BALL
+        c = np.array(((bx - cx) * BODY_SCALE, (by - cy) * BODY_SCALE, (bz - base_z) * BODY_SCALE + PEG_H))
+        neck_m = neck_m - Manifold.sphere((sb.BALL_R + 0.15) * BODY_SCALE, SEG).translate(tuple(c))
+        neck_m = neck_m + sb.diamond_prism(c, (0, 0, 1), -sb.PEG_BACK * BODY_SCALE, sb.PEG_TIP * BODY_SCALE,
+                                           sb.PEG * BODY_SCALE)
+    return neck_m
 
 
 def main(outdir):
